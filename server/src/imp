@@ -1,0 +1,37 @@
+# List databases
+sudo -u postgres psql -c "\l"
+
+# List tables in a specific db
+sudo -u postgres psql -d jlpt_learning -c "\dt"
+
+# Run a query
+sudo -u postgres psql -d jlpt_learning -c "SELECT * FROM users LIMIT 5;"
+
+
+Table	Purpose
+User	Accounts — email, password (bcrypt), username, XP, streak
+Vocabulary	Word list (N5–N1)
+KanjiEntry	Kanji with on/kun readings
+GrammarPattern	Grammar patterns with examples
+FlashcardReview	SRS state per user per card (interval, nextReview, easeFactor)
+UserProgress	Mastery % per level per skill
+UserAchievement	Which badges a user has earned
+LessonHistory	Lesson completions + XP gained
+Auth system (JWT + bcrypt)
+POST /auth/register — creates user, returns {user, token}
+POST /auth/login — validates password, returns {user, token}
+GET /auth/me — verifies token, returns current user from DB
+/api/v1/dashboard and /api/v1/user/profile are now protected — returns real DB data for the logged-in user
+Token is stored in localStorage under jlpt-auth and auto-sent on every request
+Files created
+server/prisma/schema.prisma — all models
+server/.env — DATABASE_URL + JWT_SECRET
+server/src/db.ts — Prisma singleton
+server/src/lib/jwt.ts — sign/verify helpers
+server/src/middleware/requireAuth.ts — auth guard middleware
+server/src/routes/auth.ts — register/login/me routes
+start-db.sh — start the DB cluster (run once per WSL session)
+Every time you open WSL, run:
+
+./start-db.sh          # starts PostgreSQL on port 5433
+cd server && npm run dev   # starts API on port 4000

@@ -1,0 +1,117 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String    @id @default(cuid())
+  email       String    @unique
+  username    String    @unique
+  password    String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  xp          Int       @default(0)
+  studyLevel  String    @default("N5")
+  streakDays  Int       @default(0)
+  lastStudied DateTime?
+
+  flashcards   FlashcardReview[]
+  progress     UserProgress[]
+  achievements UserAchievement[]
+  lessonHistory LessonHistory[]
+}
+
+model Vocabulary {
+  id         String   @id @default(cuid())
+  word       String
+  reading    String
+  meaning    String
+  level      String
+  category   String?
+  example    String?
+  exampleTl  String?
+
+  flashcards FlashcardReview[]
+}
+
+model KanjiEntry {
+  id          String   @id @default(cuid())
+  character   String   @unique
+  onReadings  String[]
+  kunReadings String[]
+  meaning     String
+  level       String
+  strokeCount Int?
+
+  flashcards FlashcardReview[]
+}
+
+model GrammarPattern {
+  id        String @id @default(cuid())
+  pattern   String
+  meaning   String
+  structure String
+  level     String
+  examples  Json
+  note      String?
+}
+
+model FlashcardReview {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  vocabularyId String?
+  vocabulary   Vocabulary?  @relation(fields: [vocabularyId], references: [id])
+  kanjiId      String?
+  kanji        KanjiEntry?  @relation(fields: [kanjiId], references: [id])
+  cardType     String
+
+  interval     Int      @default(1)
+  easeFactor   Float    @default(2.5)
+  nextReview   DateTime @default(now())
+  reviewCount  Int      @default(0)
+  lastRating   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, vocabularyId])
+  @@unique([userId, kanjiId])
+}
+
+model UserProgress {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  level     String
+  category  String
+  mastery   Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, level, category])
+}
+
+model UserAchievement {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievementId String
+  earnedAt      DateTime @default(now())
+
+  @@unique([userId, achievementId])
+}
+
+model LessonHistory {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lessonId   String
+  xpGained   Int      @default(0)
+  completedAt DateTime @default(now())
+}
