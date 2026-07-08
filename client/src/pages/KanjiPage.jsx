@@ -1,49 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Link, useParams } from 'react-router-dom'
-
-const ALL_KANJI = [
-  { char: '日', meaning: 'sun / day',    reading: 'にち・じつ / ひ', level: 'N5', strokes: 4,  on: 'ニチ・ジツ',   kun: 'ひ・か' },
-  { char: '本', meaning: 'origin / book',reading: 'ほん / もと',     level: 'N5', strokes: 5,  on: 'ホン',        kun: 'もと' },
-  { char: '人', meaning: 'person',       reading: 'じん / ひと',     level: 'N5', strokes: 2,  on: 'ジン・ニン',  kun: 'ひと' },
-  { char: '水', meaning: 'water',        reading: 'すい / みず',     level: 'N5', strokes: 4,  on: 'スイ',        kun: 'みず' },
-  { char: '山', meaning: 'mountain',     reading: 'さん / やま',     level: 'N5', strokes: 3,  on: 'サン',        kun: 'やま' },
-  { char: '火', meaning: 'fire',         reading: 'か / ひ',         level: 'N5', strokes: 4,  on: 'カ',          kun: 'ひ・ほ' },
-  { char: '木', meaning: 'tree',         reading: 'もく / き',       level: 'N5', strokes: 4,  on: 'モク・ボク',  kun: 'き・こ' },
-  { char: '金', meaning: 'gold / money', reading: 'きん / かね',     level: 'N5', strokes: 8,  on: 'キン・コン',  kun: 'かね・かな' },
-  { char: '土', meaning: 'earth / soil', reading: 'ど / つち',       level: 'N5', strokes: 3,  on: 'ド・ト',      kun: 'つち' },
-  { char: '学', meaning: 'study',        reading: 'がく / まな',     level: 'N5', strokes: 8,  on: 'ガク',        kun: 'まな' },
-  { char: '語', meaning: 'language',     reading: 'ご / かた',       level: 'N5', strokes: 14, on: 'ゴ',          kun: 'かた' },
-  { char: '書', meaning: 'write',        reading: 'しょ / か',       level: 'N5', strokes: 10, on: 'ショ',        kun: 'か' },
-  { char: '読', meaning: 'read',         reading: 'どく / よ',       level: 'N4', strokes: 14, on: 'ドク・トク',  kun: 'よ' },
-  { char: '食', meaning: 'eat / food',   reading: 'しょく / た',     level: 'N4', strokes: 9,  on: 'ショク・ジキ',kun: 'た・く' },
-  { char: '飲', meaning: 'drink',        reading: 'いん / の',       level: 'N4', strokes: 12, on: 'イン',        kun: 'の' },
-  { char: '見', meaning: 'see / show',   reading: 'けん / み',       level: 'N5', strokes: 7,  on: 'ケン',        kun: 'み' },
-  { char: '来', meaning: 'come',         reading: 'らい / く',       level: 'N5', strokes: 7,  on: 'ライ',        kun: 'く・き・こ' },
-  { char: '行', meaning: 'go',           reading: 'こう / い',       level: 'N5', strokes: 6,  on: 'コウ・ギョウ',kun: 'い・ゆ・おこな' },
-  { char: '知', meaning: 'know',         reading: 'ち / し',         level: 'N4', strokes: 8,  on: 'チ',          kun: 'し' },
-  { char: '思', meaning: 'think',        reading: 'し / おも',       level: 'N4', strokes: 9,  on: 'シ',          kun: 'おも' },
-  { char: '言', meaning: 'say / word',   reading: 'げん / い',       level: 'N4', strokes: 7,  on: 'ゲン・ゴン',  kun: 'い・こと' },
-  { char: '国', meaning: 'country',      reading: 'こく / くに',     level: 'N4', strokes: 8,  on: 'コク',        kun: 'くに' },
-  { char: '友', meaning: 'friend',       reading: 'ゆう / とも',     level: 'N4', strokes: 4,  on: 'ユウ',        kun: 'とも' },
-  { char: '家', meaning: 'house / home', reading: 'か / いえ',       level: 'N4', strokes: 10, on: 'カ・ケ',      kun: 'いえ・や' },
-  { char: '仕', meaning: 'serve / work', reading: 'し / つか',       level: 'N4', strokes: 5,  on: 'シ',          kun: 'つか' },
-  { char: '事', meaning: 'matter / thing',reading: 'じ / こと',      level: 'N4', strokes: 8,  on: 'ジ・ズ',      kun: 'こと' },
-  { char: '心', meaning: 'heart / mind', reading: 'しん / こころ',   level: 'N3', strokes: 4,  on: 'シン',        kun: 'こころ' },
-  { char: '力', meaning: 'power',        reading: 'りょく / ちから', level: 'N3', strokes: 2,  on: 'リョク・リキ', kun: 'ちから' },
-  { char: '問', meaning: 'question',     reading: 'もん / と',       level: 'N3', strokes: 11, on: 'モン',        kun: 'と・とん' },
-  { char: '答', meaning: 'answer',       reading: 'とう / こた',     level: 'N3', strokes: 12, on: 'トウ',        kun: 'こた' },
-  { char: '意', meaning: 'intention',    reading: 'い',              level: 'N3', strokes: 13, on: 'イ',          kun: '' },
-  { char: '味', meaning: 'flavor / taste',reading: 'み / あじ',      level: 'N3', strokes: 8,  on: 'ミ',          kun: 'あじ' },
-  { char: '変', meaning: 'change',       reading: 'へん / か',       level: 'N2', strokes: 9,  on: 'ヘン',        kun: 'か' },
-  { char: '象', meaning: 'phenomenon',   reading: 'しょう / ぞう',   level: 'N2', strokes: 12, on: 'ショウ・ゾウ', kun: '' },
-  { char: '論', meaning: 'argument',     reading: 'ろん',            level: 'N2', strokes: 15, on: 'ロン',        kun: '' },
-  { char: '存', meaning: 'exist',        reading: 'そん / ぞん',     level: 'N2', strokes: 6,  on: 'ソン・ゾン',  kun: '' },
-  { char: '概', meaning: 'outline',      reading: 'がい',            level: 'N1', strokes: 14, on: 'ガイ',        kun: '' },
-  { char: '潜', meaning: 'submerge',     reading: 'せん / もぐ',     level: 'N1', strokes: 15, on: 'セン',        kun: 'もぐ' },
-  { char: '醸', meaning: 'brew / foster',reading: 'じょう / かも',   level: 'N1', strokes: 20, on: 'ジョウ',      kun: 'かも' },
-  { char: '覇', meaning: 'hegemony',     reading: 'は',              level: 'N1', strokes: 21, on: 'ハ',          kun: '' },
-]
+import api from '../lib/api'
 
 const LEVELS = ['All', 'N5', 'N4', 'N3', 'N2', 'N1']
 const LEVEL_RE = /^N[1-5]$/i
@@ -59,21 +17,102 @@ const LEVEL_META = {
 export default function KanjiPage() {
   const { levelOrId } = useParams()
 
-  // Level-specific mode when URL is /kanji/N5, /kanji/N4, etc.
   const levelParam = levelOrId && LEVEL_RE.test(levelOrId) ? levelOrId.toUpperCase() : null
 
   const [activeLevel, setActiveLevel] = useState(levelParam ?? 'All')
   const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
+  const [kanji, setKanji] = useState([])
+  const [pagination, setPagination] = useState({ total: 0, page: 1, totalPages: 1, hasNextPage: false, hasPrevPage: false })
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
   const effectiveLevel = levelParam ?? activeLevel
   const meta = levelParam ? LEVEL_META[levelParam] : null
 
-  const filtered = ALL_KANJI.filter(k => {
-    const matchLevel = effectiveLevel === 'All' || k.level === effectiveLevel
-    const q = search.toLowerCase()
-    const matchSearch = !q || k.char.includes(q) || k.meaning.toLowerCase().includes(q) || k.reading.includes(q)
-    return matchLevel && matchSearch
+  const getNormalizedKanjiLevel = (value) => {
+    const rawLevel = String(value || '').trim().toUpperCase()
+    if (rawLevel === '1') return 'N1'
+    if (rawLevel === '2') return 'N2'
+    if (rawLevel === '3') return 'N3'
+    if (rawLevel === '4') return 'N4'
+    if (rawLevel === 'OTHER' || rawLevel === '5') return 'N5'
+    return rawLevel
+  }
+
+  const filteredKanji = kanji.filter((item) => {
+    if (effectiveLevel === 'All') return true
+
+    const normalizedLevel = getNormalizedKanjiLevel(item.level)
+    return normalizedLevel === effectiveLevel
   })
+
+  useEffect(() => {
+    let mounted = true
+
+    const fetchKanji = async () => {
+      setLoading(true)
+      setError('')
+
+      try {
+        const params = {
+          page,
+          limit: 100,
+          sortBy: effectiveLevel === 'All' ? 'level' : 'character',
+          sortOrder: 'asc',
+        }
+
+        if (search.trim()) params.q = search.trim()
+        if (effectiveLevel !== 'All') params.level = effectiveLevel
+
+        const response = await api.get('/api/kanji', { params })
+        if (!mounted) return
+
+        const payload = Array.isArray(response.data?.data) ? response.data.data : []
+        const normalized = payload.map((item) => {
+          const rawLevel = String(item.level || 'OTHER').trim().toUpperCase()
+          let normalizedLevel = rawLevel
+
+          if (rawLevel === '1') normalizedLevel = 'N1'
+          else if (rawLevel === '2') normalizedLevel = 'N2'
+          else if (rawLevel === '3') normalizedLevel = 'N3'
+          else if (rawLevel === '4') normalizedLevel = 'N4'
+          else if (rawLevel === 'OTHER' || rawLevel === '5') normalizedLevel = 'N5'
+
+          return {
+            ...item,
+            character: item.character || item.char || item.kanji || '—',
+            meaning: item.meaning || item.meanings || '—',
+            level: normalizedLevel,
+            onReadings: Array.isArray(item.onReadings) ? item.onReadings : [],
+            kunReadings: Array.isArray(item.kunReadings) ? item.kunReadings : [],
+            strokeCount: item.strokeCount ?? item.strokes ?? 0,
+          }
+        })
+
+        setKanji(normalized)
+        setPagination(response.data?.pagination ?? { total: normalized.length })
+      } catch (err) {
+        if (!mounted) return
+        console.error('Failed to load kanji from API', err)
+        // Surface useful error text where available so users can see what failed
+        const apiMessage = err?.response?.data?.message
+        const errMsg = apiMessage || err?.message || 'Unable to load kanji right now. Please try again in a moment.'
+        setError(errMsg)
+      } finally {
+        if (mounted) setLoading(false)
+      }
+    }
+
+    fetchKanji()
+    return () => {
+      mounted = false
+    }
+  }, [effectiveLevel, search, page])
+
+  useEffect(() => {
+    setPage(1)
+  }, [effectiveLevel, search])
 
   return (
     <div className="page-shell">
@@ -128,7 +167,7 @@ export default function KanjiPage() {
             </button>
           ))}
           <span style={{ marginLeft: 'auto', fontSize: '0.82rem', color: 'var(--muted-plum)', fontWeight: 600 }}>
-            {filtered.length} kanji
+            {pagination.total || filteredKanji.length} kanji
           </span>
         </motion.div>
       )}
@@ -148,38 +187,89 @@ export default function KanjiPage() {
             {levelParam}
           </span>
           <span style={{ fontSize: '0.82rem', color: 'var(--muted-plum)', fontWeight: 600 }}>
-            {filtered.length} kanji shown
+            {filteredKanji.length} kanji shown
           </span>
         </motion.div>
       )}
 
-      {/* Kanji grid */}
-      <div className="kanji-grid">
-        {filtered.map((k, i) => (
-          <motion.div
-            key={k.char}
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: i * 0.03, duration: 0.3 }}
-          >
-            <Link to={`/kanji-detail/${encodeURIComponent(k.char)}`} className="kanji-card">
-              <div className="kanji-char">{k.char}</div>
-              <div className="kanji-reading">{k.reading.split(' / ')[0]}</div>
-              <div className="kanji-meaning">{k.meaning}</div>
-              <div style={{ display: 'flex', gap: 6, justifyContent: 'center', marginTop: 4, flexWrap: 'wrap' }}>
-                <span className={`badge badge-${k.level.toLowerCase()}`}>{k.level}</span>
-                <span style={{ fontSize: '0.68rem', color: 'var(--muted-plum)', fontWeight: 600 }}>{k.strokes} strokes</span>
-              </div>
-            </Link>
-          </motion.div>
-        ))}
-      </div>
+      {loading && (
+        <div style={{ textAlign: 'center', padding: '40px 24px', color: 'var(--muted-plum)' }}>
+          Loading kanji from the database…
+        </div>
+      )}
 
-      {filtered.length === 0 && (
+      {!loading && error && (
         <div style={{ textAlign: 'center', padding: '40px 24px', color: 'var(--muted-plum)' }}>
           <div style={{ fontSize: '3rem', marginBottom: 12 }}>字</div>
-          <p style={{ fontWeight: 600 }}>No kanji match your search. Try a different term.</p>
+          <p style={{ fontWeight: 600 }}>{error}</p>
         </div>
+      )}
+
+      {!loading && !error && (
+        <>
+          <div className="kanji-grid">
+            {filteredKanji.map((k, i) => {
+              const readings = [k.onReadings, k.kunReadings].flat().filter(Boolean)
+              const previewReading = readings[0] || '—'
+              const meaning = k.meaning || '—'
+              const badgeLevel = k.level && k.level !== 'OTHER' ? k.level : 'N5'
+
+              return (
+                <motion.div
+                  key={k.character}
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ delay: i * 0.03, duration: 0.3 }}
+                >
+                  <Link to={`/kanji-detail/${encodeURIComponent(k.character)}`} className="kanji-card">
+                    <div className="kanji-char">{k.character}</div>
+                    <div className="kanji-reading">{previewReading}</div>
+                    <div className="kanji-meaning">{meaning}</div>
+                    <div style={{ display: 'flex', gap: 6, justifyContent: 'center', marginTop: 4, flexWrap: 'wrap', width: '100%' }}>
+                      <span className={`badge badge-${badgeLevel.toLowerCase()}`}>{badgeLevel}</span>
+                      <span style={{ fontSize: '0.68rem', color: 'var(--muted-plum)', fontWeight: 600 }}>{k.strokeCount || 0} strokes</span>
+                    </div>
+                  </Link>
+                </motion.div>
+              )
+            })}
+          </div>
+
+          {filteredKanji.length === 0 && (
+            <div style={{ textAlign: 'center', padding: '40px 24px', color: 'var(--muted-plum)' }}>
+              <div style={{ fontSize: '3rem', marginBottom: 12 }}>字</div>
+              <p style={{ fontWeight: 600 }}>
+                {search.trim()
+                  ? 'No kanji match your search. Try a different term.'
+                  : 'No kanji found for this level or page. Try a different filter.'}
+              </p>
+            </div>
+          )}
+
+          {(pagination.totalPages > 1 || pagination.hasPrevPage || pagination.hasNextPage) && filteredKanji.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 24, gap: 12 }}>
+              <div style={{ color: 'var(--muted-plum)', fontSize: '0.9rem' }}>
+                Page {page} of {pagination.totalPages} · {pagination.total.toLocaleString()} kanji
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  className="secondary-btn"
+                  onClick={() => setPage((prev) => Math.max(prev - 1, 1))}
+                  disabled={!pagination.hasPrevPage}
+                >
+                  Previous
+                </button>
+                <button
+                  className="primary-btn"
+                  onClick={() => setPage((prev) => Math.min(prev + 1, pagination.totalPages))}
+                  disabled={!pagination.hasNextPage}
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
     </div>

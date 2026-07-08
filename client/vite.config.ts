@@ -4,4 +4,28 @@ import react from '@vitejs/plugin-react'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:4000',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/auth/login': {
+        target: 'http://127.0.0.1:4000',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/auth/register': {
+        target: 'http://127.0.0.1:4000',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/auth/me': {
+        target: 'http://127.0.0.1:4000',
+        changeOrigin: true,
+        secure: false,
+      },
+    },
+  },
 })

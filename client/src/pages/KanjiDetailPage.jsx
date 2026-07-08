@@ -1,6 +1,7 @@
-import { useState, useRef } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { useEffect, useRef, useState } from 'react'
+import { motion } from 'framer-motion'
 import { Link, useParams } from 'react-router-dom'
+import api from '../lib/api'
 
 /* ── Stroke data (simplified SVG paths per kanji) ─────────
    Each path is one brush stroke. Real production data would
@@ -43,13 +44,6 @@ const STROKE_DATA = {
     'M 40,40 L 160,40',
     'M 40,160 L 160,160',
   ],
-}
-
-const KANJI_INFO = {
-  '日': { meaning: 'sun / day', on: 'ニチ・ジツ', kun: 'ひ・か', level: 'N5', strokes: 4, examples: [{ jp: '日本', read: 'にほん', en: 'Japan' }, { jp: '毎日', read: 'まいにち', en: 'Every day' }, { jp: '日曜日', read: 'にちようび', en: 'Sunday' }] },
-  '水': { meaning: 'water',     on: 'スイ',      kun: 'みず',   level: 'N5', strokes: 4, examples: [{ jp: '水曜日', read: 'すいようび', en: 'Wednesday' }, { jp: 'お水', read: 'おみず', en: 'Water (polite)' }] },
-  '山': { meaning: 'mountain',  on: 'サン',      kun: 'やま',   level: 'N5', strokes: 3, examples: [{ jp: '富士山', read: 'ふじさん', en: 'Mt. Fuji' }, { jp: '山登り', read: 'やまのぼり', en: 'Mountain climbing' }] },
-  '学': { meaning: 'study',     on: 'ガク',      kun: 'まな',   level: 'N5', strokes: 8, examples: [{ jp: '学校', read: 'がっこう', en: 'School' }, { jp: '大学', read: 'だいがく', en: 'University' }, { jp: '学生', read: 'がくせい', en: 'Student' }] },
 }
 
 function StrokeOrderPlayer({ strokes = [] }) {
@@ -166,8 +160,47 @@ function StrokeOrderPlayer({ strokes = [] }) {
 
 export default function KanjiDetailPage() {
   const { kanjiId } = useParams()
-  const char  = kanjiId ? decodeURIComponent(kanjiId) : '日'
-  const info  = KANJI_INFO[char] ?? { meaning: 'Kanji', on: '—', kun: '—', level: 'N5', strokes: 4, examples: [] }
+  const char = kanjiId ? decodeURIComponent(kanjiId) : '日'
+  const [kanji, setKanji] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let mounted = true
+
+    const fetchKanji = async () => {
+      setLoading(true)
+      setError('')
+
+      try {
+        const response = await api.get(`/api/kanji/${encodeURIComponent(char)}`)
+        if (!mounted) return
+        setKanji(response.data?.data ?? null)
+      } catch (err) {
+        if (!mounted) return
+        console.error('Failed to load kanji details', err)
+        setError('Unable to load this kanji right now.')
+      } finally {
+        if (mounted) setLoading(false)
+      }
+    }
+
+    fetchKanji()
+    return () => {
+      mounted = false
+    }
+  }, [char])
+
+  const info = kanji
+    ? {
+        meaning: kanji.meaning || '—',
+        on: (kanji.onReadings || []).join('・') || '—',
+        kun: (kanji.kunReadings || []).join('・') || '—',
+        level: kanji.level || 'N5',
+        strokes: kanji.strokeCount || 0,
+        examples: [],
+      }
+    : { meaning: 'Kanji', on: '—', kun: '—', level: 'N5', strokes: 0, examples: [] }
   const paths = STROKE_DATA[char] ?? STROKE_DATA.default
 
   return (
@@ -201,7 +234,7 @@ export default function KanjiDetailPage() {
             <span className={`badge badge-${info.level.toLowerCase()}`}>{info.level}</span>
           </div>
           <div style={{ marginTop: 8, fontSize: '0.78rem', color: 'var(--muted-plum)', fontWeight: 600 }}>
-            {info.strokes} strokes
+            {loading ? 'Loading…' : `${info.strokes} strokes`}
           </div>
         </motion.div>
 
@@ -226,8 +259,7 @@ export default function KanjiDetailPage() {
             </div>
           </div>
 
-          {/* Example words */}
-          {info.examples.length > 0 && (
+          {!loading && !error && info.examples.length > 0 && (
             <div style={{ marginTop: 20 }}>
               <div style={{ fontSize: '0.78rem', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--muted-plum)', marginBottom: 10 }}>Example words</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -240,6 +272,10 @@ export default function KanjiDetailPage() {
                 ))}
               </div>
             </div>
+          )}
+
+          {!loading && error && (
+            <div style={{ marginTop: 20, color: 'var(--muted-plum)', fontWeight: 600 }}>{error}</div>
           )}
 
           <div style={{ display: 'flex', gap: 10, marginTop: 20, flexWrap: 'wrap' }}>
