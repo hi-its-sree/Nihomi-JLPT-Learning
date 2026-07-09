@@ -1,48 +1,21 @@
 import { db } from '../db';
+import { mapRequestedKanjiLevel, normalizeKanjiLevel } from '../utils/kanjiLevel';
 const toKanjiRecord = (entry) => ({
     id: entry.id,
     character: entry.character,
     onReadings: entry.onReadings ?? [],
     kunReadings: entry.kunReadings ?? [],
     meaning: entry.meaning,
-    level: String(entry.level ?? 'OTHER').trim().toUpperCase() === '5'
-        ? 'OTHER'
-        : String(entry.level ?? 'OTHER').trim().toUpperCase(),
+    level: normalizeKanjiLevel(entry.level),
     strokeCount: entry.strokeCount ?? null,
 });
-const mapRequestedKanjiLevel = (level) => {
-    if (!level)
-        return undefined;
-    const normalized = String(level).trim().toUpperCase();
-    switch (normalized) {
-        case 'N1':
-            return '1';
-        case 'N2':
-            return '2';
-        case 'N3':
-            return '3';
-        case 'N4':
-            return '4';
-        case 'N5':
-        case '5':
-        case 'OTHER':
-            return 'OTHER';
-        default:
-            return undefined;
-    }
-};
 export const kanjiRepository = {
     async findMany(query) {
         const { page, limit, level, q, sortBy, sortOrder } = query;
         const where = {};
         const normalizedLevel = mapRequestedKanjiLevel(level);
         if (normalizedLevel) {
-            if (Array.isArray(normalizedLevel)) {
-                where.level = { in: normalizedLevel };
-            }
-            else {
-                where.level = normalizedLevel;
-            }
+            where.level = normalizedLevel;
         }
         if (q) {
             where.OR = [

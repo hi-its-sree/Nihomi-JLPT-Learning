@@ -3,126 +3,21 @@ import { Link } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import api from '../lib/api'
 
-const LEVELS = [
-  {
-    code: 'N5',
-    title: 'Beginner',
-    jp: '初級',
-    kanji: 100,
-    vocab: 800,
-    grammar: 50,
-    focus: 'Hiragana, katakana, daily phrases, numbers, greetings',
-    color: '#059669',
-    colorBg: 'rgba(52,211,153,0.10)',
-    colorBorder: 'rgba(52,211,153,0.25)',
-    progress: 100,
-    badge: 'badge-n5',
-    emoji: '🌱',
-  },
-  {
-    code: 'N4',
-    title: 'Elementary',
-    jp: '基礎',
-    kanji: 300,
-    vocab: 1500,
-    grammar: 100,
-    focus: 'Practical grammar, reading short texts, basic conversation',
-    color: '#0284c7',
-    colorBg: 'rgba(56,189,248,0.10)',
-    colorBorder: 'rgba(56,189,248,0.25)',
-    progress: 62,
-    badge: 'badge-n4',
-    emoji: '🌿',
-  },
-  {
-    code: 'N3',
-    title: 'Intermediate',
-    jp: '中級',
-    kanji: 650,
-    vocab: 3750,
-    grammar: 200,
-    focus: 'Broader vocabulary, listening comprehension, nuanced reading',
-    color: '#7c3aed',
-    colorBg: 'rgba(167,139,250,0.10)',
-    colorBorder: 'rgba(167,139,250,0.25)',
-    progress: 30,
-    badge: 'badge-n3',
-    emoji: '🌸',
-    current: true,
-  },
-  {
-    code: 'N2',
-    title: 'Upper-Intermediate',
-    jp: '上中級',
-    kanji: 1000,
-    vocab: 6000,
-    grammar: 300,
-    focus: 'Complex grammar structures, newspaper reading, business situations',
-    color: '#b45309',
-    colorBg: 'rgba(251,191,36,0.10)',
-    colorBorder: 'rgba(251,191,36,0.25)',
-    progress: 0,
-    badge: 'badge-n2',
-    emoji: '🎋',
-  },
-  {
-    code: 'N1',
-    title: 'Advanced',
-    jp: '上級',
-    kanji: 2136,
-    vocab: 10000,
-    grammar: 450,
-    focus: 'Academic texts, literature, nuanced expression, advanced idioms',
-    color: '#be123c',
-    colorBg: 'rgba(251,113,133,0.10)',
-    colorBorder: 'rgba(251,113,133,0.25)',
-    progress: 0,
-    badge: 'badge-n1',
-    emoji: '⛩',
-  },
-]
-
-const initialLevelsState = LEVELS.map(l => ({ ...l, progress: 0, current: false }))
-
 export default function LevelsPage() {
-  const [levelsState, setLevelsState] = useState(initialLevelsState)
-  const [masteryData, setMasteryData] = useState([])
+  const [levelsState, setLevelsState] = useState([])
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     let active = true
     const load = async () => {
       try {
-        const [dashRes, progRes] = await Promise.all([
-          api.get('/api/v1/dashboard').catch(() => ({ data: {} })),
-          api.get('/api/v1/progress').catch(() => ({ data: {} })),
-        ])
+        const { data } = await api.get('/api/v1/levels')
         if (!active) return
-        const targetLevel = dashRes.data?.target?.level
-        const mastery = progRes.data?.mastery ?? []
-        const levelOrder = ['N5', 'N4', 'N3', 'N2', 'N1']
-        const targetIndex = levelOrder.indexOf(targetLevel)
-
-        const relevant = mastery.filter(m => ['Kanji', 'Vocabulary', 'Grammar', 'Reading'].includes(m.label))
-        const avg = relevant.length > 0 ? Math.round(relevant.reduce((s, r) => s + (r.pct || 0), 0) / relevant.length) : 0
-
-        setMasteryData(relevant)
-        setLevelsState(LEVELS.map(l => {
-          const levelIndex = levelOrder.indexOf(l.code)
-          const isCurrent = l.code === targetLevel
-          const progress = isCurrent
-            ? avg
-            : targetIndex >= 0 && levelIndex < targetIndex
-              ? 100
-              : 0
-
-          return {
-            ...l,
-            current: isCurrent,
-            progress,
-          }
-        }))
+        setLevelsState(data.levels ?? [])
       } catch (err) {
-        // keep defaults on error
+        if (active) setLevelsState([])
+      } finally {
+        if (active) setLoading(false)
       }
     }
     load()
@@ -157,6 +52,16 @@ export default function LevelsPage() {
       </motion.div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {loading && (
+          <div className="content-card" style={{ textAlign: 'center', color: 'var(--muted-plum)' }}>
+            Loading your JLPT levels from the database…
+          </div>
+        )}
+        {!loading && levelsState.length === 0 && (
+          <div className="content-card" style={{ textAlign: 'center', color: 'var(--muted-plum)' }}>
+            No level data is available yet.
+          </div>
+        )}
         {levelsState.map((lvl, i) => (
           <motion.div
             key={lvl.code}
@@ -245,13 +150,9 @@ export default function LevelsPage() {
                         Not started
                       </span>
                     )}
-                    {lvl.current && masteryData.length > 0 && (
-                      <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                        {masteryData.map(item => (
-                          <div key={item.label} style={{ padding: '6px 10px', borderRadius: 999, background: 'rgba(245,245,245,0.9)', border: '1px solid rgba(221,221,221,0.7)', color: 'var(--dark-ink)', fontSize: '0.75rem', fontWeight: 700 }}>
-                            {item.label}: {item.pct}%
-                          </div>
-                        ))}
+                    {lvl.current && (
+                      <div style={{ marginTop: 10, fontSize: '0.78rem', fontWeight: 700, color: lvl.color }}>
+                        Your active JLPT target
                       </div>
                     )}
                   </div>

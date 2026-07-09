@@ -1,10 +1,12 @@
+export type KanjiLevel = 'N5' | 'N4' | 'N3' | 'N2' | 'N1' | 'OTHER'
+
 export interface KanjiEntryRecord {
   id: string
   character: string
   onReadings: string[]
   kunReadings: string[]
   meaning: string
-  level: string
+  level: KanjiLevel
   strokeCount: number | null
 }
 

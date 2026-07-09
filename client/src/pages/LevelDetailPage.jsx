@@ -1,18 +1,7 @@
 import { motion } from 'framer-motion'
 import { Link, useParams } from 'react-router-dom'
-
-const LEVEL_DATA = {
-  N5: { title: 'Beginner', jp: '初級', color: '#059669', kanji: 100, vocab: 800, grammar: 50,
-    topics: ['Basic hiragana & katakana', 'Numbers and counters', 'Daily greetings', 'Time expressions', 'Basic sentence structure (は、が、を)', 'Family vocabulary', 'Colors and directions', 'Basic verb conjugation'] },
-  N4: { title: 'Elementary', jp: '基礎', color: '#0284c7', kanji: 300, vocab: 1500, grammar: 100,
-    topics: ['て-form verbs', 'Conditional forms (〜たら、〜と)', 'Potential form', 'Giving and receiving', 'Passive voice basics', 'Short reading comprehension', 'Everyday conversation topics'] },
-  N3: { title: 'Intermediate', jp: '中級', color: '#7c3aed', kanji: 650, vocab: 3750, grammar: 200,
-    topics: ['Complex verb forms', 'Causative-passive', 'Conjunctions (〜のに、〜ために)', 'Formal and informal registers', 'News and editorial reading', 'Extended listening passages', 'Idiomatic expressions'] },
-  N2: { title: 'Upper-Intermediate', jp: '上中級', color: '#b45309', kanji: 1000, vocab: 6000, grammar: 300,
-    topics: ['Business Japanese', 'Formal written style', 'Complex conditionals', 'Nominalisation patterns', 'Newspaper articles', 'Long listening passages', 'Advanced grammar patterns'] },
-  N1: { title: 'Advanced', jp: '上級', color: '#be123c', kanji: 2136, vocab: 10000, grammar: 450,
-    topics: ['Literary Japanese', 'Classical grammar elements', 'Academic and technical texts', 'Nuanced expression', 'Advanced idiomatic usage', 'Political and cultural commentary', 'Full-length reading passages'] },
-}
+import { useEffect, useState } from 'react'
+import api from '../lib/api'
 
 const SECTIONS = [
   { icon: '字', label: 'Kanji',      basePath: 'kanji',      desc: 'Stroke order, readings, and tracing practice' },
@@ -26,7 +15,33 @@ const SECTIONS = [
 export default function LevelDetailPage() {
   const { levelId } = useParams()
   const code = levelId?.toUpperCase() ?? 'N3'
-  const lvl  = LEVEL_DATA[code] ?? LEVEL_DATA.N3
+  const [lvl, setLvl] = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let active = true
+    const load = async () => {
+      try {
+        const { data } = await api.get(`/api/v1/levels/${encodeURIComponent(code)}`)
+        if (!active) return
+        setLvl(data)
+      } catch (err) {
+        if (active) setLvl(null)
+      } finally {
+        if (active) setLoading(false)
+      }
+    }
+    load()
+    return () => { active = false }
+  }, [code])
+
+  if (loading) {
+    return <div className="page-shell"><div className="content-card" style={{ textAlign: 'center', color: 'var(--muted-plum)' }}>Loading level details from the database…</div></div>
+  }
+
+  if (!lvl) {
+    return <div className="page-shell"><div className="content-card" style={{ textAlign: 'center', color: 'var(--muted-plum)' }}>Unable to load this level right now.</div></div>
+  }
 
   return (
     <div className="page-shell">

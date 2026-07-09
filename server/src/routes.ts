@@ -1,10 +1,81 @@
 import { Hono } from 'hono'
+import type { Prisma } from '@prisma/client'
 import { db } from './db'
 import { requireAuth } from './middleware/requireAuth'
 import authRoutes from './routes/auth'
 import kanjiRoutes from './routes/kanji'
 
 const router = new Hono()
+
+const LEVEL_ORDER = ['N5', 'N4', 'N3', 'N2', 'N1'] as const
+const LEVEL_META: Record<(typeof LEVEL_ORDER)[number], { title: string; jp: string; focus: string; color: string; emoji: string }> = {
+  N5: { title: 'Beginner', jp: '初級', focus: 'Hiragana, katakana, daily greetings, and simple sentence patterns.', color: '#059669', emoji: '🌱' },
+  N4: { title: 'Elementary', jp: '基礎', focus: 'Everyday conversation, practical grammar, and short reading.', color: '#0284c7', emoji: '🌿' },
+  N3: { title: 'Intermediate', jp: '中級', focus: 'Broader vocabulary, listening comprehension, and nuanced reading.', color: '#7c3aed', emoji: '🌸' },
+  N2: { title: 'Upper Intermediate', jp: '上中級', focus: 'Longer passages, business contexts, and natural speech patterns.', color: '#b45309', emoji: '🎋' },
+  N1: { title: 'Advanced', jp: '上級', focus: 'Literary, academic, and complex real-world Japanese.', color: '#be123c', emoji: '⛩' },
+}
+
+function normalizeLevelCode(value?: string | null) {
+  const upper = value?.toUpperCase()
+  return LEVEL_ORDER.includes(upper as (typeof LEVEL_ORDER)[number]) ? upper as (typeof LEVEL_ORDER)[number] : 'N5'
+}
+
+async function buildLevelCatalog(userId?: string) {
+  const [user, vocabularyCounts, kanjiCounts, grammarCounts, progressEntries] = await Promise.all([
+    userId ? db.user.findUnique({ where: { id: userId }, select: { studyLevel: true } }) : Promise.resolve(null),
+    db.vocabulary.groupBy({ by: ['level'], _count: { id: true } }),
+    db.kanjiEntry.groupBy({ by: ['level'], _count: { id: true } }),
+    db.grammarPattern.groupBy({ by: ['level'], _count: { id: true } }),
+    userId ? db.userProgress.findMany({ where: { userId }, select: { level: true, mastery: true } }) : Promise.resolve([]),
+  ])
+
+  const vocabMap = Object.fromEntries(vocabularyCounts.map((entry) => [normalizeLevelCode(entry.level), entry._count.id]))
+  const kanjiMap = Object.fromEntries(kanjiCounts.map((entry) => [normalizeLevelCode(entry.level), entry._count.id]))
+  const grammarMap = Object.fromEntries(grammarCounts.map((entry) => [normalizeLevelCode(entry.level), entry._count.id]))
+
+  const progressByLevel = new Map<string, number[]>()
+  progressEntries.forEach((entry) => {
+    const level = normalizeLevelCode(entry.level)
+    const bucket = progressByLevel.get(level) ?? []
+    bucket.push(entry.mastery)
+    progressByLevel.set(level, bucket)
+  })
+
+  const currentLevel = normalizeLevelCode(user?.studyLevel)
+  const currentIndex = LEVEL_ORDER.indexOf(currentLevel)
+
+  return LEVEL_ORDER.map((level, index) => {
+    const meta = LEVEL_META[level]
+    const vocabCount = vocabMap[level] ?? 0
+    const kanjiCount = kanjiMap[level] ?? 0
+    const grammarCount = grammarMap[level] ?? 0
+    const averageProgress = progressByLevel.get(level)?.length
+      ? Math.round(progressByLevel.get(level)!.reduce((sum, value) => sum + value, 0) / progressByLevel.get(level)!.length)
+      : 0
+
+    let progress = 0
+    if (index < currentIndex) progress = 100
+    else if (index === currentIndex) progress = Math.max(0, Math.min(100, averageProgress))
+
+    return {
+      code: level,
+      title: meta.title,
+      jp: meta.jp,
+      focus: meta.focus,
+      color: meta.color,
+      colorBg: `${meta.color}14`,
+      colorBorder: `${meta.color}33`,
+      badge: `badge-${level.toLowerCase()}`,
+      emoji: meta.emoji,
+      kanji: kanjiCount,
+      vocab: vocabCount,
+      grammar: grammarCount,
+      progress,
+      current: index === currentIndex,
+    }
+  })
+}
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
 
@@ -42,9 +113,9 @@ router.get('/api/v1/dashboard', requireAuth, async (c) => {
 
   const levelOrder = ['N5', 'N4', 'N3', 'N2', 'N1'] as const
   const targetLevel = user.studyLevel && levelOrder.includes(user.studyLevel as (typeof levelOrder)[number])
-    ? user.studyLevel
+    ? user.studyLevel as (typeof levelOrder)[number]
     : 'N5'
-  const targetIndex = levelOrder.indexOf(targetLevel as (typeof levelOrder)[number])
+  const targetIndex = levelOrder.indexOf(targetLevel)
 
   const targetMeta: Record<string, { focus: string; weeklyGoal: number; baseMastery: { kanji: number; vocabulary: number; grammar: number; reading: number } }> = {
     N5: { focus: 'Build the basics: hiragana, katakana, simple grammar, and everyday vocabulary.', weeklyGoal: 300, baseMastery: { kanji: 10, vocabulary: 8, grammar: 7, reading: 6 } },
@@ -55,6 +126,15 @@ router.get('/api/v1/dashboard', requireAuth, async (c) => {
   }
 
   const target = targetMeta[targetLevel] ?? targetMeta.N5
+
+  const vocabTotals: Record<(typeof levelOrder)[number], number> = {
+    N5: 662,
+    N4: 1294,
+    N3: 3078,
+    N2: 4871,
+    N1: 8334,
+  }
+  const vocabTotal = vocabTotals[targetLevel] ?? 8334
 
   const boostFromActivity = Math.min(20, user._count.lessonHistory * 2 + user.streakDays + Math.floor(user.xp / 200))
   const masterySeed = {
@@ -92,7 +172,7 @@ router.get('/api/v1/dashboard', requireAuth, async (c) => {
 
   const mastery = [
     { label: 'Kanji', done: Math.round(650 * (masterySeed.kanji / 100)), total: 650, pct: Math.round(masterySeed.kanji), color: '#c97a4a' },
-    { label: 'Vocabulary', done: Math.round(1500 * (masterySeed.vocabulary / 100)), total: 1500, pct: Math.round(masterySeed.vocabulary), color: '#8b6f8b' },
+    { label: 'Vocabulary', done: Math.round(vocabTotal * (masterySeed.vocabulary / 100)), total: vocabTotal, pct: Math.round(masterySeed.vocabulary), color: '#8b6f8b' },
     { label: 'Grammar', done: Math.round(120 * (masterySeed.grammar / 100)), total: 120, pct: Math.round(masterySeed.grammar), color: '#7d8d6a' },
     { label: 'Reading', done: Math.round(40 * (masterySeed.reading / 100)), total: 40, pct: Math.round(masterySeed.reading), color: '#5b8fa8' },
   ]
@@ -136,70 +216,174 @@ router.get('/api/v1/dashboard', requireAuth, async (c) => {
 
 // ── Levels ───────────────────────────────────────────────────────────────────
 
-router.get('/api/v1/levels', (c) => {
+router.get('/api/v1/levels', requireAuth, async (c) => {
+  const userId = c.get('userId') as string
+  const levels = await buildLevelCatalog(userId)
+  return c.json({ levels })
+})
+
+router.get('/api/v1/levels/:levelId', requireAuth, async (c) => {
+  const userId = c.get('userId') as string
+  const level = normalizeLevelCode(c.req.param('levelId'))
+  const levels = await buildLevelCatalog(userId)
+  const detail = levels.find((entry) => entry.code === level)
+  if (!detail) return c.json({ error: 'Level not found' }, 404)
+
   return c.json({
-    levels: [
-      { code: 'N5', title: 'Beginner', kanji: 103, vocab: 800, grammar: 68, progress: 72, current: false },
-      { code: 'N4', title: 'Elementary', kanji: 181, vocab: 1500, grammar: 84, progress: 45, current: false },
-      { code: 'N3', title: 'Intermediate', kanji: 367, vocab: 3000, grammar: 113, progress: 28, current: true },
-      { code: 'N2', title: 'Upper Intermediate', kanji: 367, vocab: 6000, grammar: 182, progress: 0, current: false },
-      { code: 'N1', title: 'Advanced', kanji: 1118, vocab: 10000, grammar: 212, progress: 0, current: false },
+    ...detail,
+    outcomes: [
+      'Practice vocabulary from the database',
+      'Review kanji entries from the database',
+      'Explore grammar patterns from the database',
+      'Track progress for this level',
+    ],
+    topics: [
+      `Database vocabulary entries: ${detail.vocab}`,
+      `Database kanji entries: ${detail.kanji}`,
+      `Database grammar patterns: ${detail.grammar}`,
+      `Current progress: ${detail.progress}%`,
     ],
   })
 })
 
-router.get('/api/v1/levels/:levelId', (c) => {
-  const level = c.req.param('levelId').toUpperCase()
-  const data: Record<string, { code: string; title: string; focus: string; outcomes: string[]; kanji: number; vocab: number; grammar: number }> = {
-    N5: { code: 'N5', title: 'Beginner', focus: 'Hiragana, Katakana, 103 Kanji, basic grammar', outcomes: ['Introduce yourself', 'Ask for directions', 'Talk about daily routines', 'Count and tell time'], kanji: 103, vocab: 800, grammar: 68 },
-    N4: { code: 'N4', title: 'Elementary', focus: '284 total Kanji, everyday conversation', outcomes: ['Discuss hobbies', 'Express opinions', 'Navigate daily life in Japan', 'Read simple texts'], kanji: 181, vocab: 1500, grammar: 84 },
-    N3: { code: 'N3', title: 'Intermediate', focus: '650 total Kanji, complex grammar patterns', outcomes: ['Read news headlines', 'Hold casual conversations', 'Understand TV drama context', 'Write semi-formal emails'], kanji: 367, vocab: 3000, grammar: 113 },
-    N2: { code: 'N2', title: 'Upper Intermediate', focus: '1017 total Kanji, near-natural speech', outcomes: ['Read newspaper articles', 'Understand lectures', 'Write formal documents', 'Pass most job requirements'], kanji: 367, vocab: 6000, grammar: 182 },
-    N1: { code: 'N1', title: 'Advanced', focus: '2136 total Kanji, near-native proficiency', outcomes: ['Read literature', 'Understand abstract discussions', 'Work in Japanese', 'Watch any media without subtitles'], kanji: 1118, vocab: 10000, grammar: 212 },
-  }
-  const detail = data[level]
-  if (!detail) return c.json({ error: 'Level not found' }, 404)
-  return c.json(detail)
-})
-
 // ── Vocabulary ────────────────────────────────────────────────────────────────
 
-router.get('/api/v1/vocabulary', (c) => {
+router.get('/api/v1/vocabulary', requireAuth, async (c) => {
   const level = c.req.query('level')
   const stage = c.req.query('stage')
-  const vocab = [
-    { id: 1, word: '食べる', reading: 'たべる', meaning: 'to eat', pos: 'Verb', level: 'N5', stage: 'known', example: 'ご飯を食べる。', exTl: 'I eat rice.' },
-    { id: 2, word: '飲む', reading: 'のむ', meaning: 'to drink', pos: 'Verb', level: 'N5', stage: 'review', example: '水を飲む。', exTl: 'I drink water.' },
-    { id: 3, word: '大きい', reading: 'おおきい', meaning: 'big / large', pos: 'Adj-i', level: 'N5', stage: 'known', example: '大きい犬。', exTl: 'A big dog.' },
-    { id: 4, word: '静か', reading: 'しずか', meaning: 'quiet / calm', pos: 'Adj-na', level: 'N5', stage: 'new', example: '静かな場所。', exTl: 'A quiet place.' },
-    { id: 5, word: '走る', reading: 'はしる', meaning: 'to run', pos: 'Verb', level: 'N5', stage: 'review', example: '公園で走る。', exTl: 'I run in the park.' },
-    { id: 6, word: '勉強する', reading: 'べんきょうする', meaning: 'to study', pos: 'Verb', level: 'N5', stage: 'new', example: '日本語を勉強する。', exTl: 'I study Japanese.' },
-    { id: 7, word: '電車', reading: 'でんしゃ', meaning: 'train', pos: 'Noun', level: 'N4', stage: 'review', example: '電車に乗る。', exTl: 'I ride the train.' },
-    { id: 8, word: '場合', reading: 'ばあい', meaning: 'case / situation', pos: 'Noun', level: 'N3', stage: 'new', example: 'その場合は連絡してください。', exTl: 'In that case, please contact me.' },
-    { id: 9, word: '驚く', reading: 'おどろく', meaning: 'to be surprised', pos: 'Verb', level: 'N3', stage: 'new', example: '彼女は驚いた。', exTl: 'She was surprised.' },
-    { id: 10, word: '概念', reading: 'がいねん', meaning: 'concept / notion', pos: 'Noun', level: 'N1', stage: 'new', example: '新しい概念を学ぶ。', exTl: 'Learn a new concept.' },
-  ]
-  let result = vocab
-  if (level) result = result.filter(v => v.level === level)
-  if (stage) result = result.filter(v => v.stage === stage)
-  return c.json({ vocab: result, total: result.length })
+  const search = c.req.query('search')
+
+  const normalizedLevel = level && ['N5', 'N4', 'N3', 'N2', 'N1'].includes(level.toUpperCase()) ? level.toUpperCase() : undefined
+  const normalizedStage = stage && ['new', 'review', 'known'].includes(stage.toLowerCase()) ? stage.toLowerCase() : undefined
+
+  const where: Prisma.VocabularyWhereInput = {}
+  if (normalizedLevel) where.level = normalizedLevel
+  if (normalizedStage) where.category = normalizedStage
+  if (search) {
+    where.OR = [
+      { word: { contains: search, mode: 'insensitive' } },
+      { reading: { contains: search, mode: 'insensitive' } },
+      { meaning: { contains: search, mode: 'insensitive' } },
+      { example: { contains: search, mode: 'insensitive' } },
+    ]
+  }
+
+  const rows = await db.vocabulary.findMany({
+    where,
+    orderBy: { word: 'asc' },
+    select: {
+      id: true,
+      word: true,
+      reading: true,
+      meaning: true,
+      level: true,
+      category: true,
+      example: true,
+      exampleTl: true,
+    },
+  })
+
+  const vocab = rows.map((entry) => ({
+    id: entry.id,
+    word: entry.word,
+    reading: entry.reading,
+    meaning: entry.meaning,
+    level: entry.level?.toUpperCase() ?? 'N5',
+    stage: (entry.category ?? 'new').toLowerCase(),
+    example: entry.example ?? entry.exampleTl ?? '',
+    exTl: entry.exampleTl ?? '',
+    pos: 'word',
+  }))
+
+  return c.json({ vocab, total: vocab.length })
 })
 
 // ── Grammar ───────────────────────────────────────────────────────────────────
 
-router.get('/api/v1/grammar', (c) => {
+router.get('/api/v1/grammar', requireAuth, async (c) => {
   const level = c.req.query('level')
-  const grammar = [
-    { id: 1, pattern: '〜は〜です', meaning: 'Topic is [noun]', level: 'N5', structure: '[Topic]は[Noun]です', example: 'わたしは学生です。', exTl: 'I am a student.' },
-    { id: 2, pattern: '〜が好きです', meaning: 'I like ~', level: 'N5', structure: '[Noun]が好きです', example: '日本語が好きです。', exTl: 'I like Japanese.' },
-    { id: 3, pattern: '〜てもいいですか', meaning: 'May I do ~?', level: 'N5', structure: '[V-te]もいいですか', example: 'ここに座ってもいいですか。', exTl: 'May I sit here?' },
-    { id: 4, pattern: '〜なければならない', meaning: 'Must do ~', level: 'N4', structure: '[V-nai stem]なければならない', example: '宿題をしなければならない。', exTl: 'I must do my homework.' },
-    { id: 5, pattern: '〜のに', meaning: 'Even though ~ / For ~', level: 'N3', structure: '[V/Adj]のに[contrast]', example: '頑張ったのに失敗した。', exTl: 'Even though I tried hard, I failed.' },
-    { id: 6, pattern: '〜にもかかわらず', meaning: 'Despite ~ / In spite of ~', level: 'N2', structure: '[Noun/V]にもかかわらず', example: '雨にもかかわらず試合は続いた。', exTl: 'Despite the rain, the game continued.' },
-  ]
-  let result = grammar
-  if (level) result = result.filter(g => g.level === level)
-  return c.json({ grammar: result, total: result.length })
+  const search = c.req.query('search')
+
+  const normalizedLevel = level && ['N5', 'N4', 'N3', 'N2', 'N1'].includes(level.toUpperCase()) ? level.toUpperCase() : undefined
+
+  const where: Prisma.GrammarPatternWhereInput = {}
+  if (normalizedLevel) where.level = normalizedLevel
+  if (search) {
+    where.OR = [
+      { pattern:   { contains: search, mode: 'insensitive' } },
+      { meaning:   { contains: search, mode: 'insensitive' } },
+      { structure: { contains: search, mode: 'insensitive' } },
+    ]
+  }
+
+  const rows = await db.grammarPattern.findMany({
+    where,
+    orderBy: [{ level: 'asc' }, { pattern: 'asc' }],
+    take: 300,
+    select: {
+      id: true,
+      pattern: true,
+      meaning: true,
+      structure: true,
+      level: true,
+      examples: true,
+      note: true,
+    },
+  })
+
+  const grammar = rows.map((entry) => {
+    const examples = Array.isArray(entry.examples) ? entry.examples : []
+    const firstExample = examples.length > 0 ? examples[0] : null
+
+    const exampleText = (() => {
+      if (typeof firstExample === 'string') return firstExample
+      if (typeof firstExample === 'object' && firstExample !== null) {
+        const exampleObj = firstExample as Record<string, any>
+        return String(exampleObj.japanese ?? exampleObj.text ?? exampleObj.sentence ?? exampleObj.example ?? '')
+      }
+      return ''
+    })()
+
+    const exampleTranslation = (() => {
+      if (typeof firstExample === 'object' && firstExample !== null) {
+        const exampleObj = firstExample as Record<string, any>
+        return String(exampleObj.english ?? exampleObj.translation ?? exampleObj.exTl ?? '')
+      }
+      return ''
+    })()
+
+    const conjugations = examples.slice(1).map((example) => {
+      if (typeof example === 'string') return example
+      if (typeof example === 'object' && example !== null) {
+        const exampleObj = example as Record<string, any>
+        if ('japanese' in exampleObj || 'english' in exampleObj) {
+          return `${String(exampleObj.japanese ?? exampleObj.text ?? exampleObj.sentence ?? '')}${exampleObj.english ? ` (${String(exampleObj.english)})` : ''}`
+        }
+        if ('text' in exampleObj) {
+          return `${String(exampleObj.text)}${exampleObj.translation ? ` (${String(exampleObj.translation)})` : ''}`
+        }
+        if ('pattern' in exampleObj) {
+          return String(exampleObj.pattern)
+        }
+        return JSON.stringify(exampleObj)
+      }
+      return String(example)
+    })
+
+    return {
+      id: entry.id,
+      pattern: entry.pattern,
+      meaning: entry.meaning,
+      structure: entry.structure,
+      level: entry.level?.toUpperCase() ?? 'N5',
+      example: exampleText,
+      translation: exampleTranslation,
+      note: entry.note ?? '',
+      conjugations,
+    }
+  })
+
+  return c.json({ grammar, total: grammar.length })
 })
 
 // ── Flashcards / SRS ──────────────────────────────────────────────────────────
@@ -231,18 +415,44 @@ router.post('/api/v1/flashcards/:id/review', async (c) => {
 
 // ── Practice ─────────────────────────────────────────────────────────────────
 
-router.get('/api/v1/practice', (c) => {
+router.get('/api/v1/practice', requireAuth, async (c) => {
+  const userId = c.get('userId') as string
+  const now = new Date()
+  const [user, vocabCount, kanjiCount, grammarCount, reviewEntries, todayLessons, progressEntries] = await Promise.all([
+    db.user.findUnique({ where: { id: userId }, select: { studyLevel: true } }),
+    db.vocabulary.count(),
+    db.kanjiEntry.count(),
+    db.grammarPattern.count(),
+    db.flashcardReview.findMany({ where: { userId }, select: { lastRating: true, nextReview: true, reviewCount: true } }),
+    db.lessonHistory.findMany({ where: { userId, completedAt: { gte: new Date(now.getFullYear(), now.getMonth(), now.getDate()) } }, select: { xpGained: true } }),
+    db.userProgress.findMany({ where: { userId }, select: { category: true, mastery: true } }),
+  ])
+
+  const reviewedCount = reviewEntries.filter((entry) => entry.reviewCount > 0).length
+  const dueCount = reviewEntries.filter((entry) => entry.nextReview <= now).length
+  const completedReviews = reviewEntries.filter((entry) => entry.lastRating).length
+  const accurateReviews = reviewEntries.filter((entry) => entry.lastRating && ['good', 'easy'].includes(entry.lastRating)).length
+  const accuracy = completedReviews > 0 ? Math.round((accurateReviews / completedReviews) * 100) : 0
+  const xpToday = todayLessons.reduce((sum, lesson) => sum + lesson.xpGained, 0)
+  const minutesStudied = Math.max(5, Math.round((reviewedCount + todayLessons.length) * 4))
+
+  const weakPoints = progressEntries
+    .filter((entry) => typeof entry.mastery === 'number')
+    .sort((a, b) => a.mastery - b.mastery)
+    .slice(0, 3)
+    .map((entry) => ({ topic: entry.category, accuracy: entry.mastery }))
+
   return c.json({
     modes: [
-      { id: 'srs', title: 'SRS Flashcard Review', icon: '🃏', desc: 'Review due cards using spaced repetition.', tags: ['Vocabulary', 'Kanji'], color: '#e8a87c', dueCount: 24 },
-      { id: 'stroke', title: 'Kanji Stroke Practice', icon: '✍', desc: 'Trace stroke order for N5–N3 kanji.', tags: ['Kanji', 'Writing'], color: '#b07d62', dueCount: 12 },
-      { id: 'grammar', title: 'Grammar Drills', icon: '文', desc: 'Fill-in-the-blank pattern practice.', tags: ['Grammar'], color: '#a0816a', dueCount: 8 },
-      { id: 'vocab', title: 'Vocabulary Quiz', icon: '語', desc: 'Multiple-choice and meaning recall.', tags: ['Vocabulary'], color: '#c97a4a', dueCount: 16 },
-      { id: 'reading', title: 'Reading Passages', icon: '📖', desc: 'Short texts with comprehension questions.', tags: ['Reading'], color: '#7a8fc9', dueCount: 3 },
-      { id: 'listening', title: 'Listening Drills', icon: '👂', desc: 'Audio clips with answer selection.', tags: ['Listening'], color: '#6abfa0', dueCount: 5 },
+      { id: 'srs', title: 'SRS Flashcard Review', icon: '🃏', desc: 'Review due cards using spaced repetition.', tags: ['Vocabulary', 'Kanji'], color: '#e8a87c', dueCount },
+      { id: 'stroke', title: 'Kanji Stroke Practice', icon: '✍', desc: `Practice ${kanjiCount} kanji entries from the database.`, tags: ['Kanji', 'Writing'], color: '#b07d62', dueCount: Math.min(kanjiCount, 12) },
+      { id: 'grammar', title: 'Grammar Drills', icon: '文', desc: `Review ${grammarCount} grammar patterns stored in the database.`, tags: ['Grammar'], color: '#a0816a', dueCount: Math.min(grammarCount, 8) },
+      { id: 'vocab', title: 'Vocabulary Quiz', icon: '語', desc: `Work through ${vocabCount} vocabulary entries from the database.`, tags: ['Vocabulary'], color: '#c97a4a', dueCount: Math.min(vocabCount, 16) },
+      { id: 'reading', title: 'Reading Passages', icon: '📖', desc: 'Use your current JLPT level to guide study sessions.', tags: ['Reading'], color: '#7a8fc9', dueCount: user?.studyLevel === 'N5' ? 3 : 5 },
+      { id: 'listening', title: 'Listening Drills', icon: '👂', desc: 'Practice listening with content aligned to your current level.', tags: ['Listening'], color: '#6abfa0', dueCount: user?.studyLevel === 'N3' ? 7 : 4 },
     ],
-    stats: { reviewed: 48, accuracy: 87, xpToday: 145, minutesStudied: 34 },
-    weakPoints: [{ topic: 'て-form conjugation', accuracy: 61 }, { topic: 'N3 Kanji readings', accuracy: 53 }],
+    stats: { reviewed: reviewedCount, accuracy, xpToday, minutesStudied },
+    weakPoints,
   })
 })
 
@@ -276,7 +486,7 @@ router.get('/api/v1/progress', requireAuth, async (c) => {
   if (!user) return c.json({ error: 'User not found' }, 404)
 
   // Map progress entries to mastery structure
-  const totals = { Kanji: 650, Vocabulary: 3000, Grammar: 120, Reading: 40, Listening: 36 }
+  const totals: Record<string, number> = { Kanji: 650, Vocabulary: 8334, Grammar: 120, Reading: 40, Listening: 36 }
   const mastery = progressEntries.map(p => {
     const label = p.category.charAt(0).toUpperCase() + p.category.slice(1)
     const total = totals[label] ?? null

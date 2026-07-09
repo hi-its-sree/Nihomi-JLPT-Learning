@@ -11,11 +11,11 @@ const LEVELS = [
     status: 'complete', progress: 100, xp: 1200,
     icon: '🌱', emoji: '🌱',
 
-    overview: 'N5 is the entry point into Japanese. You will learn to read and write hiragana and katakana — the two phonetic scripts that form the foundation of all Japanese text. With 103 kanji, ~800 vocabulary words, and essential grammar patterns, you will be able to handle simple everyday situations.',
+    overview: 'N5 is the entry point into Japanese. You will learn to read and write hiragana and katakana — the two phonetic scripts that form the foundation of all Japanese text. With 103 kanji, 662 vocabulary words, and essential grammar patterns, you will be able to handle simple everyday situations.',
     whoFor: 'Complete beginners with zero prior Japanese knowledge.',
     studyHours: { min: 150, max: 300, note: 'for an English speaker starting from scratch' },
 
-    stats: { kanji: 103, vocab: 800, grammar: 68 },
+    stats: { kanji: 103, vocab: 662, grammar: 68 },
     readingLevel:   { label: 'Very Simple',   score: 1, desc: 'Hiragana, katakana, and a few basic kanji. Very short sentences.' },
     listeningLevel: { label: 'Slow & Clear',  score: 1, desc: 'Slow, clear speech on familiar everyday topics.' },
 
@@ -49,7 +49,7 @@ const LEVELS = [
     curriculum: [
       { icon: '✍️', title: 'Writing System', desc: 'Master all 46 hiragana and 46 katakana characters. These are the foundation — every Japanese text uses them. You will also be introduced to the concept of kanji as meaning-based characters.' },
       { icon: '字', title: 'Kanji', desc: '103 essential kanji covering numbers (一二三), nature (山水火木), directions, family, time, and common nouns. Focus on recognition and basic reading.' },
-      { icon: '語', title: 'Vocabulary', desc: '~800 core words used in daily life — greetings, numbers, colours, body parts, food, transport, and simple verbs and adjectives. All words appear in hiragana and kanji forms.' },
+      { icon: '語', title: 'Vocabulary', desc: '662 core words used in daily life — greetings, numbers, colours, body parts, food, transport, and simple verbs and adjectives. All words appear in hiragana and kanji forms.' },
       { icon: '文', title: 'Grammar', desc: '68 foundational patterns including sentence structure (S + O + V), particle usage (は が を に で), polite verb forms (〜ます / 〜です), and basic question formation (〜か).' },
       { icon: '📖', title: 'Reading', desc: 'Very short passages (3–5 sentences) using hiragana, katakana, and basic kanji. Topics: notices, menus, timetables. Furigana (reading aids) are always provided.' },
       { icon: '👂', title: 'Listening', desc: 'Short monologues and dialogues on familiar topics — introductions, shopping, schedules. Speech is slow and clearly articulated. No background noise.' },
@@ -68,7 +68,7 @@ const LEVELS = [
     whoFor: 'Learners who have completed N5 or have ~150–300 hours of Japanese study.',
     studyHours: { min: 300, max: 600, note: 'total study time from zero' },
 
-    stats: { kanji: 284, vocab: 1500, grammar: 84 },
+    stats: { kanji: 284, vocab: 632, grammar: 84 },
     readingLevel:   { label: 'Simple',       score: 2, desc: 'Short passages on everyday topics. Basic kanji with furigana support.' },
     listeningLevel: { label: 'Near-Natural', score: 2, desc: 'Conversations at near-natural speed on familiar topics. Some inference needed.' },
 
@@ -98,12 +98,12 @@ const LEVELS = [
       'て-form chains for sequential actions',
     ],
     skillsUnlocked: ['Navigate daily life in Japan', 'Hold short conversations', 'Read simple passages', 'Express necessity and permission', 'Recognise 284 kanji total'],
-    prerequisites: ['N5 completion or equivalent', 'Hiragana & katakana fluency', 'Basic verb dictionary forms', '800+ vocabulary words'],
+    prerequisites: ['N5 completion or equivalent', 'Hiragana & katakana fluency', 'Basic verb dictionary forms', '662+ vocabulary words'],
 
     curriculum: [
       { icon: '✍️', title: 'Writing System', desc: 'Hiragana and katakana are now assumed. Focus shifts to reading mixed scripts (kanji + kana) fluently. Introduction to kanji compound words (熟語).' },
       { icon: '字', title: 'Kanji', desc: '181 new kanji added to the N5 base (284 total). Covers verbs (食 読 書), body parts (頭 手 足), places (駅 店 公園), and common adjectives. Reading and writing practice.' },
-      { icon: '語', title: 'Vocabulary', desc: '~1,500 total words. New additions: verbs of motion, adjectives of emotion, transport vocabulary, work and school terminology, and connective expressions.' },
+      { icon: '語', title: 'Vocabulary', desc: '632 level-specific words. New additions: verbs of motion, adjectives of emotion, transport vocabulary, work and school terminology, and connective expressions.' },
       { icon: '文', title: 'Grammar', desc: '84 new patterns. Highlights: て-form chains, conditionals (〜たら・〜と・〜ば), potential (〜られる), passive (〜られる), giving/receiving (あげる・くれる・もらう), and 〜ほうがいい (advice).' },
       { icon: '📖', title: 'Reading', desc: 'Short passages (6–10 sentences) on topics like schedules, instructions, postcards, and diary entries. Some kanji without furigana. Reading for main idea and key details.' },
       { icon: '👂', title: 'Listening', desc: 'Conversations at near-natural speed between two speakers. Topics include plans, requests, descriptions of events. Some inference and context clues needed.' },
@@ -122,7 +122,7 @@ const LEVELS = [
     whoFor: 'Learners who have passed N4 or have approximately 450–600 total hours of study.',
     studyHours: { min: 450, max: 900, note: 'total study time; ~150–300 additional hours from N4' },
 
-    stats: { kanji: 650, vocab: 3750, grammar: 113 },
+    stats: { kanji: 650, vocab: 1784, grammar: 113 },
     readingLevel:   { label: 'Intermediate',  score: 3, desc: 'Multi-paragraph texts, news headlines, informal writing. Mixed kanji without furigana.' },
     listeningLevel: { label: 'Natural Speed', score: 3, desc: 'Full natural-speed conversations. Background context and inference essential.' },
 
@@ -152,12 +152,12 @@ const LEVELS = [
       'Expressing degree: 〜ほど, 〜くらい, 〜さえ',
     ],
     skillsUnlocked: ['Read mixed-script texts without furigana', 'Understand natural-speed dialogue', 'Express complex ideas in writing', 'Navigate workplace basics', 'Recognise 650 total kanji'],
-    prerequisites: ['N4 completion or equivalent', 'Solid て-form and conditional mastery', 'Basic passive and potential forms', '1,500+ vocabulary words'],
+    prerequisites: ['N4 completion or equivalent', 'Solid て-form and conditional mastery', 'Basic passive and potential forms', '1,294+ vocabulary words'],
 
     curriculum: [
       { icon: '✍️', title: 'Writing System', desc: 'All texts are now in natural mixed script — no furigana. You will read kanji compounds fluently as units of meaning rather than individual characters.' },
       { icon: '字', title: 'Kanji', desc: '366 new kanji added (650 total). Covers abstract concepts (意味 感情 関係), verbs of thinking and feeling (思 感 考), social contexts (社会 政治 経済), and more complex compound patterns.' },
-      { icon: '語', title: 'Vocabulary', desc: '~3,750 total words. New additions: abstract nouns, connective adverbs (さらに、しかし、一方), polite speech variants, idiomatic phrases, and emotional vocabulary.' },
+      { icon: '語', title: 'Vocabulary', desc: '1,784 level-specific words. New additions: abstract nouns, connective adverbs (さらに、しかし、一方), polite speech variants, idiomatic phrases, and emotional vocabulary.' },
       { icon: '文', title: 'Grammar', desc: '113 new patterns. Key highlights: causative (〜させる), causative-passive (〜させられる), complex conjunctions (〜のに・〜ながら・〜ために), expressing degree, formal and written styles.' },
       { icon: '📖', title: 'Reading', desc: 'Multi-paragraph passages (200–400 characters) on practical topics: news articles, announcements, advertisements, informal letters. Tested on main point, detail, and author intent.' },
       { icon: '👂', title: 'Listening', desc: 'Full natural-speed conversations, announcements, and short presentations. Questions require inference, understanding of speaker relationship and purpose.' },
@@ -176,7 +176,7 @@ const LEVELS = [
     whoFor: 'Learners who have passed N3 with confidence and are prepared for an intensive academic-style study period.',
     studyHours: { min: 600, max: 1200, note: 'total study time; ~300–400 additional hours from N3' },
 
-    stats: { kanji: 1017, vocab: 6000, grammar: 182 },
+    stats: { kanji: 1017, vocab: 1793, grammar: 182 },
     readingLevel:   { label: 'Advanced',       score: 4, desc: 'Newspaper articles, formal documents, editorials. Complex sentence structures and abstract topics.' },
     listeningLevel: { label: 'Complex & Fast', score: 4, desc: 'Lectures, interviews, news broadcasts. Longer passages with implicit information.' },
 
@@ -206,12 +206,12 @@ const LEVELS = [
       'Collocations and fixed expressions common in written Japanese',
     ],
     skillsUnlocked: ['Professional-level communication', 'Read newspapers & editorials', 'Academic study in Japan', 'Understand broadcasts & lectures', 'Recognise 1,017 total kanji'],
-    prerequisites: ['N3 completion with strong grammar foundation', 'Comfortable reading without furigana', 'Understanding of natural-speed speech', '3,000+ vocabulary words', 'Familiarity with formal Japanese registers'],
+    prerequisites: ['N3 completion with strong grammar foundation', 'Comfortable reading without furigana', 'Understanding of natural-speed speech', '3,078+ vocabulary words', 'Familiarity with formal Japanese registers'],
 
     curriculum: [
       { icon: '✍️', title: 'Writing System', desc: 'All 1,017 N1–N2 kanji are used freely. Focus on kanji used in formal and written contexts — legal, business, academic. Reading kanji-heavy newspaper text fluently.' },
       { icon: '字', title: 'Kanji', desc: '367 new kanji added (1,017 total). Includes business kanji (契約 報告 決定), academic vocabulary (研究 分析 理論), and complex compounds used in formal writing and newspapers.' },
-      { icon: '語', title: 'Vocabulary', desc: '~6,000 total words. Heavy focus on formal vocabulary, business terms (プレゼン 会議 交渉), connective expressions for formal writing, and idiomatic phrases used in newspapers and broadcasts.' },
+      { icon: '語', title: 'Vocabulary', desc: '1,793 level-specific words. Heavy focus on formal vocabulary, business terms (プレゼン 会議 交渉), connective expressions for formal writing, and idiomatic phrases used in newspapers and broadcasts.' },
       { icon: '文', title: 'Grammar', desc: '182 new patterns with strong emphasis on formal written style: 〜にもかかわらず, 〜をはじめとして, 〜に反して, 〜をめぐって, 〜に伴い. Many patterns appear exclusively in written Japanese.' },
       { icon: '📖', title: 'Reading', desc: 'Long passages (400–600 characters): newspaper editorials, formal announcements, business emails, and academic-style writing. Questions test comprehension, inference, and vocabulary in context.' },
       { icon: '👂', title: 'Listening', desc: 'Extended audio (3–5 minutes): lectures, news, interviews, presentations. Questions require understanding of speaker stance, supporting arguments, and overall structure — not just facts.' },
@@ -226,11 +226,11 @@ const LEVELS = [
     status: 'upcoming', progress: 0, xp: 0,
     icon: '🏯', emoji: '🏯',
 
-    overview: 'N1 is the pinnacle of the JLPT — the proof of near-native Japanese proficiency. It demands mastery of virtually all common kanji (2,136), an extensive vocabulary (~10,000 words), and an understanding of literary, academic, and classical expressions. N1 holders can operate in any professional, academic, or social context in Japan without meaningful language barriers.',
+    overview: 'N1 is the pinnacle of the JLPT — the proof of near-native Japanese proficiency. It demands mastery of virtually all common kanji (2,136), an extensive vocabulary (3,463 level-specific words), and an understanding of literary, academic, and classical expressions. N1 holders can operate in any professional, academic, or social context in Japan without meaningful language barriers.',
     whoFor: 'Learners who have passed N2 and are committed to achieving near-native Japanese proficiency.',
     studyHours: { min: 900, max: 2000, note: 'total study time; 400–900+ additional hours from N2' },
 
-    stats: { kanji: 2136, vocab: 10000, grammar: 212 },
+    stats: { kanji: 2136, vocab: 3463, grammar: 212 },
     readingLevel:   { label: 'Near-Native',  score: 5, desc: 'Literature, academic papers, legal documents, complex editorials. Nuanced and implied meaning.' },
     listeningLevel: { label: 'Expert',        score: 5, desc: 'Any authentic Japanese audio — varied accents, fast speech, abstract topics, cultural nuance.' },
 
@@ -260,12 +260,12 @@ const LEVELS = [
       'All Jōyō kanji (2,136) plus extended kanji set',
     ],
     skillsUnlocked: ['Near-native reading & listening', 'Any professional role in Japan', 'Academic study at Japanese universities', 'Fluent written Japanese in all registers', 'All 2,136 Jōyō kanji'],
-    prerequisites: ['N2 completion', '6,000+ vocabulary words', 'Solid formal grammar and keigo', 'Regular exposure to authentic Japanese media', 'Consistent long-form reading and listening practice'],
+    prerequisites: ['N2 completion', '4,871+ vocabulary words', 'Solid formal grammar and keigo', 'Regular exposure to authentic Japanese media', 'Consistent long-form reading and listening practice'],
 
     curriculum: [
       { icon: '✍️', title: 'Writing System', desc: 'All 2,136 Jōyō kanji plus extended characters used in names and literature. Classical kana usage (historical spelling), kanji-only readings in academic texts, and advanced compound patterns.' },
       { icon: '字', title: 'Kanji', desc: '1,119 new kanji added (2,136 total — the complete Jōyō set). Covers all domains: literary, legal, political, scientific, cultural, and classical. Many kanji have multiple readings used in specific contexts.' },
-      { icon: '語', title: 'Vocabulary', desc: '~10,000+ total words. Includes literary expressions, classical vocabulary, four-character idioms (四字熟語), technical terminology across multiple fields, and subtle distinctions between near-synonyms.' },
+      { icon: '語', title: 'Vocabulary', desc: '3,463 level-specific words. Includes literary expressions, classical vocabulary, four-character idioms (四字熟語), technical terminology across multiple fields, and subtle distinctions between near-synonyms.' },
       { icon: '文', title: 'Grammar', desc: '212 advanced patterns including classical grammar (〜べきだ, 〜に他ならない, 〜に過ぎない, 〜に足る), highly formal written style patterns, and expressions unique to academic and literary contexts.' },
       { icon: '📖', title: 'Reading', desc: 'Long, complex passages (600–900+ characters): academic articles, literary excerpts, editorials, official documents. Tested on nuanced understanding, author intent, implicit meaning, and vocabulary in specialised contexts.' },
       { icon: '👂', title: 'Listening', desc: 'Extended authentic audio (5–10 minutes): academic lectures, complex interviews, debates, narrative storytelling. Varied speakers, registers, and speeds. Questions test inference, abstract comprehension, and speaker stance.' },
@@ -674,7 +674,7 @@ export default function RoadmapPage() {
         {/* Aggregate curriculum stats */}
         <motion.div style={{ display: 'flex', gap: 10, marginTop: 20, flexWrap: 'wrap' }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.75 }}>
           <StatChip icon="字" label="Total Kanji" value="2,136" color="#7c3aed" />
-          <StatChip icon="語" label="Total Vocab" value="10,000+" color="#0284c7" />
+          <StatChip icon="語" label="Total Vocab" value="8,334+" color="#0284c7" />
           <StatChip icon="文" label="Grammar Pts" value="657+" color="#b45309" />
           <StatChip icon="⏱️" label="Study Hours" value="900–2,000+" color="#059669" />
         </motion.div>

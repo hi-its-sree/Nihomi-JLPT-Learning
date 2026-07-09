@@ -12,7 +12,7 @@ const PILLARS = [
 
 const STATS = [
   { val: '2,136', label: 'Kanji covered (N5→N1)' },
-  { val: '10,000+', label: 'Vocabulary items' },
+  { val: '8,334+', label: 'Vocabulary items' },
   { val: '450+', label: 'Grammar patterns' },
   { val: '5', label: 'JLPT levels' },
 ]

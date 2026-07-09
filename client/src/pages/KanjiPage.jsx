@@ -3,11 +3,12 @@ import { motion } from 'framer-motion'
 import { Link, useParams } from 'react-router-dom'
 import api from '../lib/api'
 
-const LEVELS = ['All', 'N5', 'N4', 'N3', 'N2', 'N1']
-const LEVEL_RE = /^N[1-5]$/i
+const LEVELS = ['All', 'N5', 'N4', 'N3', 'N2', 'N1', 'Other']
+const LEVEL_RE = /^(N[1-5]|OTHER)$/i
 
 const LEVEL_META = {
   N5: { title: 'N5 Beginner Kanji',           color: '#059669', total: 103 },
+  OTHER: { title: 'Other Level Kanji',       color: '#6b7280', total: 0 },
   N4: { title: 'N4 Elementary Kanji',         color: '#0284c7', total: 181 },
   N3: { title: 'N3 Intermediate Kanji',       color: '#7c3aed', total: 367 },
   N2: { title: 'N2 Upper-Intermediate Kanji', color: '#b45309', total: 367 },
@@ -17,9 +18,15 @@ const LEVEL_META = {
 export default function KanjiPage() {
   const { levelOrId } = useParams()
 
+  const normalizeLevelFilterValue = (value) => {
+    if (!value || value === 'All') return 'All'
+    const normalized = String(value).trim().toUpperCase()
+    return normalized === 'OTHER' ? 'OTHER' : normalized
+  }
+
   const levelParam = levelOrId && LEVEL_RE.test(levelOrId) ? levelOrId.toUpperCase() : null
 
-  const [activeLevel, setActiveLevel] = useState(levelParam ?? 'All')
+  const [activeLevel, setActiveLevel] = useState(() => normalizeLevelFilterValue(levelParam ?? 'All'))
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [kanji, setKanji] = useState([])
@@ -27,17 +34,28 @@ export default function KanjiPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
-  const effectiveLevel = levelParam ?? activeLevel
+  const effectiveLevel = normalizeLevelFilterValue(levelParam ?? activeLevel)
   const meta = levelParam ? LEVEL_META[levelParam] : null
 
   const getNormalizedKanjiLevel = (value) => {
     const rawLevel = String(value || '').trim().toUpperCase()
-    if (rawLevel === '1') return 'N1'
-    if (rawLevel === '2') return 'N2'
-    if (rawLevel === '3') return 'N3'
-    if (rawLevel === '4') return 'N4'
-    if (rawLevel === 'OTHER' || rawLevel === '5') return 'N5'
-    return rawLevel
+
+    switch (rawLevel) {
+      case '1':
+        return 'N1'
+      case '2':
+        return 'N2'
+      case '3':
+        return 'N3'
+      case '4':
+        return 'N4'
+      case '5':
+        return 'N5'
+      case 'OTHER':
+        return 'OTHER'
+      default:
+        return rawLevel
+    }
   }
 
   const filteredKanji = kanji.filter((item) => {
@@ -70,14 +88,7 @@ export default function KanjiPage() {
 
         const payload = Array.isArray(response.data?.data) ? response.data.data : []
         const normalized = payload.map((item) => {
-          const rawLevel = String(item.level || 'OTHER').trim().toUpperCase()
-          let normalizedLevel = rawLevel
-
-          if (rawLevel === '1') normalizedLevel = 'N1'
-          else if (rawLevel === '2') normalizedLevel = 'N2'
-          else if (rawLevel === '3') normalizedLevel = 'N3'
-          else if (rawLevel === '4') normalizedLevel = 'N4'
-          else if (rawLevel === 'OTHER' || rawLevel === '5') normalizedLevel = 'N5'
+          const normalizedLevel = getNormalizedKanjiLevel(item.level)
 
           return {
             ...item,
@@ -163,7 +174,7 @@ export default function KanjiPage() {
               className={`filter-pill ${activeLevel === l ? 'active' : ''}`}
               onClick={() => setActiveLevel(l)}
             >
-              {l}
+              {l === 'Other' ? 'Other • misc' : l}
             </button>
           ))}
           <span style={{ marginLeft: 'auto', fontSize: '0.82rem', color: 'var(--muted-plum)', fontWeight: 600 }}>
@@ -212,7 +223,7 @@ export default function KanjiPage() {
               const readings = [k.onReadings, k.kunReadings].flat().filter(Boolean)
               const previewReading = readings[0] || '—'
               const meaning = k.meaning || '—'
-              const badgeLevel = k.level && k.level !== 'OTHER' ? k.level : 'N5'
+              const badgeLevel = k.level || 'N5'
 
               return (
                 <motion.div

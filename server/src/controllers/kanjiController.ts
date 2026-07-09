@@ -2,6 +2,7 @@ import type { Context } from 'hono'
 import { kanjiService } from '../services/kanjiService'
 import { buildResponse } from '../utils/response'
 import { kanjiListQuerySchema, kanjiCharacterParamSchema } from '../utils/validation'
+import { normalizeKanjiLevel } from '../utils/kanjiLevel'
 
 const normalizeQueryValue = (value: string | null | undefined): string | undefined => {
   if (value === null || value === undefined) return undefined
@@ -15,7 +16,7 @@ export class KanjiController {
       const rawQuery = {
         page: normalizeQueryValue(c.req.query('page')),
         limit: normalizeQueryValue(c.req.query('limit')),
-        level: normalizeQueryValue(c.req.query('level')),
+        level: normalizeQueryValue(c.req.query('level')) ? normalizeKanjiLevel(normalizeQueryValue(c.req.query('level'))) : undefined,
         q: normalizeQueryValue(c.req.query('q')),
         sortBy: normalizeQueryValue(c.req.query('sortBy')),
         sortOrder: normalizeQueryValue(c.req.query('sortOrder')),

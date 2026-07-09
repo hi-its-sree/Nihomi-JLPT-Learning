@@ -1,67 +1,19 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Link, useParams } from 'react-router-dom'
-
-const GRAMMAR = [
-  {
-    pattern: '〜たい',      level: 'N5',
-    meaning: 'Want to do…',
-    structure: 'Verb stem + たい',
-    example: '日本語を話したい。',
-    translation: 'I want to speak Japanese.',
-    note: 'Used to express the speaker\'s desire to perform an action. Changes like an i-adjective.',
-    conjugations: ['食べたい (want to eat)', '行きたい (want to go)', '見たい (want to see)'],
-  },
-  {
-    pattern: '〜ている',     level: 'N5',
-    meaning: 'Is doing / is in a state of…',
-    structure: 'Verb て-form + いる',
-    example: '今、本を読んでいます。',
-    translation: 'I am reading a book now.',
-    note: 'Expresses ongoing actions or resulting states. Contracted to 〜てる in casual speech.',
-    conjugations: ['食べている (is eating)', '寝ている (is sleeping)', '結婚している (is married)'],
-  },
-  {
-    pattern: '〜ほうがいい', level: 'N4',
-    meaning: 'It is better to… / You should…',
-    structure: 'Verb past plain + ほうがいい',
-    example: '早く寝たほうがいいよ。',
-    translation: 'You should sleep early.',
-    note: 'Gives advice. Affirmative uses past plain form; negative uses ない + ほうがいい.',
-    conjugations: ['行ったほうがいい (should go)', '飲まないほうがいい (should not drink)'],
-  },
-  {
-    pattern: '〜てしまう',   level: 'N3',
-    meaning: 'Ended up doing / unfortunately did…',
-    structure: 'Verb て-form + しまう',
-    example: '財布を忘れてしまった。',
-    translation: 'I accidentally left my wallet behind.',
-    note: 'Expresses completion, often with regret or an unintended result. Casual: 〜ちゃう.',
-    conjugations: ['食べてしまった (ended up eating)', 'なくしてしまった (unfortunately lost)'],
-  },
-  {
-    pattern: '〜ために',     level: 'N3',
-    meaning: 'In order to / for the purpose of…',
-    structure: 'Verb dictionary form + ために',
-    example: '日本語を覚えるために、毎日練習します。',
-    translation: 'I practice every day in order to learn Japanese.',
-    note: 'Expresses purpose. Use 〜のために with nouns. Different from 〜から (cause) or 〜ので (reason).',
-    conjugations: ['試験に合格するために (to pass the exam)', '健康のために (for health)'],
-  },
-  {
-    pattern: '〜にもかかわらず', level: 'N2',
-    meaning: 'Despite / in spite of…',
-    structure: 'Noun / Verb plain + にもかかわらず',
-    example: '雨にもかかわらず、試合を続けた。',
-    translation: 'Despite the rain, the game continued.',
-    note: 'Formal written style. Emphasizes the contrast between expectation and result.',
-    conjugations: ['困難にもかかわらず (despite difficulties)', '反対にもかかわらず (despite opposition)'],
-  },
-]
+import api from '../lib/api'
 
 const LEVELS = ['All', 'N5', 'N4', 'N3', 'N2', 'N1']
 const LEVEL_COLORS = { N5: '#059669', N4: '#0284c7', N3: '#7c3aed', N2: '#b45309', N1: '#be123c' }
 const LEVEL_RE = /^N[1-5]$/i
+
+const STAGES = {
+  new:    { label: 'New',    color: '#0284c7', bg: 'rgba(56,189,248,0.12)'  },
+  review: { label: 'Review', color: '#b45309', bg: 'rgba(251,191,36,0.12)' },
+  known:  { label: 'Known',  color: '#059669', bg: 'rgba(52,211,153,0.12)' },
+}
+
+const POS_COLORS = { noun: '#7c3aed', verb: '#0284c7', adj: '#b45309', phrase: '#059669', word: '#c97a4a' }
 
 function GrammarCard({ g, expanded, onToggle }) {
   const color = LEVEL_COLORS[g.level] ?? 'var(--terracotta)'
@@ -139,15 +91,42 @@ export default function GrammarPage() {
   const [activeLevel, setActiveLevel] = useState(levelParam ?? 'All')
   const [search, setSearch]           = useState('')
   const [expanded, setExpanded]       = useState(null)
+  const [items, setItems]             = useState([])
+  const [loading, setLoading]         = useState(true)
+  const [error, setError]             = useState('')
 
   const effectiveLevel = levelParam ?? activeLevel
 
-  const filtered = GRAMMAR.filter(g => {
-    const matchLevel = effectiveLevel === 'All' || g.level === effectiveLevel
-    const q = search.toLowerCase()
-    const matchSearch = !q || g.pattern.includes(q) || g.meaning.toLowerCase().includes(q)
-    return matchLevel && matchSearch
-  })
+  useEffect(() => {
+    let active = true
+    const timeoutId = window.setTimeout(async () => {
+      setLoading(true)
+      try {
+        const params = new URLSearchParams()
+        if (effectiveLevel !== 'All') params.set('level', effectiveLevel)
+        if (search.trim()) params.set('search', search.trim())
+
+        const { data } = await api.get(`/api/v1/grammar${params.toString() ? `?${params.toString()}` : ''}`)
+        if (!active) return
+        setItems(data.grammar ?? [])
+        setError('')
+      } catch (err) {
+        if (active) {
+          setItems([])
+          setError('Unable to load grammar patterns from the database right now.')
+        }
+      } finally {
+        if (active) setLoading(false)
+      }
+    }, 250)
+
+    return () => {
+      active = false
+      window.clearTimeout(timeoutId)
+    }
+  }, [effectiveLevel, search])
+
+  const filtered = items
 
   return (
     <div className="page-shell">
@@ -191,12 +170,27 @@ export default function GrammarPage() {
             {levelParam}
           </span>
         )}
-        <span style={{ marginLeft: 'auto', fontSize: '0.82rem', color: 'var(--muted-plum)', fontWeight: 600 }}>{filtered.length} patterns</span>
+        <span style={{ marginLeft: 'auto', fontSize: '0.82rem', color: 'var(--muted-plum)', fontWeight: 600 }}>{items.length} patterns</span>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {filtered.map((g, i) => (
-          <motion.div key={g.pattern} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
+        {loading && (
+          <div className="content-card" style={{ textAlign: 'center', color: 'var(--muted-plum)' }}>
+            Loading grammar patterns from the database…
+          </div>
+        )}
+        {!loading && error && (
+          <div className="content-card" style={{ textAlign: 'center', color: 'var(--muted-plum)' }}>
+            {error}
+          </div>
+        )}
+        {!loading && !error && filtered.length === 0 && (
+          <div className="content-card" style={{ textAlign: 'center', color: 'var(--muted-plum)' }}>
+            No grammar patterns match your current filter.
+          </div>
+        )}
+        {!loading && !error && filtered.map((g, i) => (
+          <motion.div key={g.pattern ?? g.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
             <GrammarCard
               g={g}
               expanded={expanded === g.pattern}

@@ -1,21 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Link, useParams } from 'react-router-dom'
-
-const VOCABULARY = [
-  { word: 'こんにちは', kana: 'こんにちは', meaning: 'Hello / Good afternoon', level: 'N5', pos: 'phrase',    srsStage: 'new',     example: 'こんにちは！元気ですか？' },
-  { word: '学校',      kana: 'がっこう',   meaning: 'School',                  level: 'N5', pos: 'noun',     srsStage: 'known',   example: '学校は楽しいです。' },
-  { word: '勉強する',   kana: 'べんきょうする', meaning: 'To study',             level: 'N5', pos: 'verb',     srsStage: 'review',  example: '毎日日本語を勉強します。' },
-  { word: '電車',      kana: 'でんしゃ',   meaning: 'Train',                   level: 'N5', pos: 'noun',     srsStage: 'known',   example: '電車で学校へ行きます。' },
-  { word: '自然',      kana: 'しぜん',     meaning: 'Nature',                  level: 'N3', pos: 'noun',     srsStage: 'new',     example: '自然が大好きです。' },
-  { word: '経験',      kana: 'けいけん',   meaning: 'Experience',              level: 'N3', pos: 'noun',     srsStage: 'new',     example: '大切な経験です。' },
-  { word: '達成する',   kana: 'たっせいする', meaning: 'To achieve / accomplish', level: 'N2', pos: 'verb',  srsStage: 'new',     example: '目標を達成した。' },
-  { word: '複雑',      kana: 'ふくざつ',   meaning: 'Complex / complicated',   level: 'N2', pos: 'adj',      srsStage: 'new',     example: '複雑な問題だ。' },
-  { word: '曖昧',      kana: 'あいまい',   meaning: 'Vague / ambiguous',       level: 'N1', pos: 'adj',      srsStage: 'new',     example: '曖昧な表現を避けてください。' },
-  { word: '概念',      kana: 'がいねん',   meaning: 'Concept / notion',        level: 'N1', pos: 'noun',     srsStage: 'new',     example: '重要な概念を理解した。' },
-  { word: '友達',      kana: 'ともだち',   meaning: 'Friend',                  level: 'N5', pos: 'noun',     srsStage: 'known',   example: '友達と公園へ行きました。' },
-  { word: '仕事',      kana: 'しごと',     meaning: 'Work / job',              level: 'N4', pos: 'noun',     srsStage: 'review',  example: '仕事が好きです。' },
-]
+import api from '../lib/api'
 
 const STAGES = {
   new:    { label: 'New',    color: '#0284c7', bg: 'rgba(56,189,248,0.12)'  },
@@ -24,7 +10,7 @@ const STAGES = {
 }
 
 const LEVELS = ['All', 'N5', 'N4', 'N3', 'N2', 'N1']
-const POS_COLORS = { noun: '#7c3aed', verb: '#0284c7', adj: '#b45309', phrase: '#059669' }
+const POS_COLORS = { noun: '#7c3aed', verb: '#0284c7', adj: '#b45309', phrase: '#059669', word: '#c97a4a' }
 const LEVEL_RE = /^N[1-5]$/i
 const LEVEL_COLORS = { N5: '#059669', N4: '#0284c7', N3: '#7c3aed', N2: '#b45309', N1: '#be123c' }
 
@@ -35,16 +21,42 @@ export default function VocabularyPage() {
   const [activeLevel, setActiveLevel] = useState(levelParam ?? 'All')
   const [search, setSearch]           = useState('')
   const [activeStage, setActiveStage] = useState('All')
+  const [items, setItems] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
   const effectiveLevel = levelParam ?? activeLevel
+  const filtered = items
 
-  const filtered = VOCABULARY.filter(v => {
-    const matchLevel = effectiveLevel === 'All' || v.level === effectiveLevel
-    const matchStage = activeStage === 'All' || v.srsStage === activeStage
-    const q = search.toLowerCase()
-    const matchSearch = !q || v.word.includes(q) || v.kana.includes(q) || v.meaning.toLowerCase().includes(q)
-    return matchLevel && matchStage && matchSearch
-  })
+  useEffect(() => {
+    let active = true
+    const timeoutId = window.setTimeout(async () => {
+      setLoading(true)
+      try {
+        const params = new URLSearchParams()
+        if (effectiveLevel !== 'All') params.set('level', effectiveLevel)
+        if (activeStage !== 'All') params.set('stage', activeStage)
+        if (search.trim()) params.set('search', search.trim())
+
+        const { data } = await api.get(`/api/v1/vocabulary${params.toString() ? `?${params.toString()}` : ''}`)
+        if (!active) return
+        setItems(data.vocab ?? [])
+        setError('')
+      } catch (err) {
+        if (active) {
+          setItems([])
+          setError('Unable to load vocabulary from the database right now.')
+        }
+      } finally {
+        if (active) setLoading(false)
+      }
+    }, 250)
+
+    return () => {
+      active = false
+      window.clearTimeout(timeoutId)
+    }
+  }, [effectiveLevel, activeStage, search])
 
   return (
     <div className="page-shell">
@@ -110,51 +122,66 @@ export default function VocabularyPage() {
             </button>
           ))}
           <span style={{ marginLeft: 'auto', fontSize: '0.82rem', color: 'var(--muted-plum)', fontWeight: 600 }}>
-            {filtered.length} words
+            {items.length} words
           </span>
         </div>
       </motion.div>
 
       {/* Word grid */}
-      <div className="grid-2">
-        {filtered.map((v, i) => {
-          const stage = STAGES[v.srsStage]
-          const posColor = POS_COLORS[v.pos] ?? 'var(--muted-plum)'
-          return (
-            <motion.div
-              key={v.word}
-              className="content-card"
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.04 }}
-            >
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
-                <div>
-                  <div style={{ fontSize: '1.4rem', fontWeight: 900, color: 'var(--dark-ink)', lineHeight: 1.2 }}>{v.word}</div>
-                  <div style={{ fontSize: '0.82rem', color: 'var(--terracotta)', fontWeight: 700, marginTop: 2 }}>{v.kana}</div>
+      {loading && (
+        <div className="content-card" style={{ textAlign: 'center', color: 'var(--muted-plum)' }}>
+          Loading vocabulary from the database…
+        </div>
+      )}
+      {!loading && error && (
+        <div className="content-card" style={{ textAlign: 'center', color: 'var(--muted-plum)' }}>{error}</div>
+      )}
+      {!loading && !error && filtered.length === 0 && (
+        <div className="content-card" style={{ textAlign: 'center', color: 'var(--muted-plum)' }}>
+          No vocabulary entries found for this filter.
+        </div>
+      )}
+      {!loading && !error && filtered.length > 0 && (
+        <div className="grid-2">
+          {filtered.map((v, i) => {
+            const stage = STAGES[v.stage] ?? STAGES.new
+            const posColor = POS_COLORS[v.pos] ?? POS_COLORS.word
+            return (
+              <motion.div
+                key={v.id ?? v.word}
+                className="content-card"
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.04 }}
+              >
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+                  <div>
+                    <div style={{ fontSize: '1.4rem', fontWeight: 900, color: 'var(--dark-ink)', lineHeight: 1.2 }}>{v.word}</div>
+                    <div style={{ fontSize: '0.82rem', color: 'var(--terracotta)', fontWeight: 700, marginTop: 2 }}>{v.reading}</div>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end' }}>
+                    <span className={`badge badge-${(v.level ?? 'n5').toLowerCase()}`}>{v.level}</span>
+                    <span style={{ fontSize: '0.68rem', fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: `${posColor}18`, color: posColor }}>{v.pos}</span>
+                  </div>
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end' }}>
-                  <span className={`badge badge-${v.level.toLowerCase()}`}>{v.level}</span>
-                  <span style={{ fontSize: '0.68rem', fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: `${posColor}18`, color: posColor }}>{v.pos}</span>
+
+                <p style={{ color: 'var(--dark-ink)', fontWeight: 700, fontSize: '0.95rem', marginTop: 10 }}>{v.meaning}</p>
+
+                <div style={{ marginTop: 10, padding: '10px 12px', borderRadius: 12, background: 'rgba(201,122,74,0.06)', border: '1px solid rgba(201,122,74,0.12)' }}>
+                  <span style={{ fontSize: '0.82rem', color: 'var(--muted-plum)' }}>{v.example}</span>
                 </div>
-              </div>
 
-              <p style={{ color: 'var(--dark-ink)', fontWeight: 700, fontSize: '0.95rem', marginTop: 10 }}>{v.meaning}</p>
-
-              <div style={{ marginTop: 10, padding: '10px 12px', borderRadius: 12, background: 'rgba(201,122,74,0.06)', border: '1px solid rgba(201,122,74,0.12)' }}>
-                <span style={{ fontSize: '0.82rem', color: 'var(--muted-plum)' }}>{v.example}</span>
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
-                <span style={{ fontSize: '0.72rem', fontWeight: 700, padding: '3px 10px', borderRadius: 999, background: stage.bg, color: stage.color }}>
-                  {stage.label}
-                </span>
-                <button className="ghost-btn btn-sm" style={{ fontSize: '0.75rem' }}>Add to review</button>
-              </div>
-            </motion.div>
-          )
-        })}
-      </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
+                  <span style={{ fontSize: '0.72rem', fontWeight: 700, padding: '3px 10px', borderRadius: 999, background: stage.bg, color: stage.color }}>
+                    {stage.label}
+                  </span>
+                  <button className="ghost-btn btn-sm" style={{ fontSize: '0.75rem' }}>Add to review</button>
+                </div>
+              </motion.div>
+            )
+          })}
+        </div>
+      )}
 
     </div>
   )
