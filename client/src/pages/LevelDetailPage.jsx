@@ -18,6 +18,8 @@ export default function LevelDetailPage() {
   const [lvl, setLvl] = useState(null)
   const [loading, setLoading] = useState(true)
 
+  const getCount = (level, key) => level?.stats?.[key] ?? level?.[key] ?? 0
+
   useEffect(() => {
     let active = true
     const load = async () => {
@@ -70,9 +72,9 @@ export default function LevelDetailPage() {
 
         <div style={{ display: 'flex', gap: 28, flexWrap: 'wrap', marginBottom: 20 }}>
           {[
-            { label: 'Kanji',   val: lvl.kanji.toLocaleString() },
-            { label: 'Vocab',   val: lvl.vocab.toLocaleString() },
-            { label: 'Grammar', val: lvl.grammar },
+            { label: 'Kanji',   val: getCount(lvl, 'kanji').toLocaleString() },
+            { label: 'Vocab',   val: getCount(lvl, 'vocab').toLocaleString() },
+            { label: 'Grammar', val: getCount(lvl, 'grammar') },
           ].map(m => (
             <div key={m.label}>
               <div style={{ fontSize: '1.6rem', fontWeight: 900, color: 'var(--dark-ink)' }}>{m.val}</div>

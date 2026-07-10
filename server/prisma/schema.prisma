@@ -12,6 +12,11 @@ model User {
   email       String    @unique
   username    String    @unique
   password    String
+  recoveryAnswer1 String?
+  recoveryAnswer2 String?
+  recoveryAnswer3 String?
+  recoveryAnswer4 String?
+  recoveryAnswer5 String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -20,10 +25,13 @@ model User {
   streakDays  Int       @default(0)
   lastStudied DateTime?
 
+  hasSkippedJourney Boolean @default(false)
+
   flashcards   FlashcardReview[]
   progress     UserProgress[]
   achievements UserAchievement[]
   lessonHistory LessonHistory[]
+  journeyProgress JourneyProgress[]
 }
 
 model Vocabulary {
@@ -76,6 +84,7 @@ model FlashcardReview {
   easeFactor   Float    @default(2.5)
   nextReview   DateTime @default(now())
   reviewCount  Int      @default(0)
+  lapses       Int      @default(0)
   lastRating   String?
 
   createdAt DateTime @default(now())
@@ -114,4 +123,15 @@ model LessonHistory {
   lessonId   String
   xpGained   Int      @default(0)
   completedAt DateTime @default(now())
+}
+
+model JourneyProgress {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chapterId   String
+  xpAwarded   Int      @default(0)
+  completedAt DateTime @default(now())
+
+  @@unique([userId, chapterId])
 }

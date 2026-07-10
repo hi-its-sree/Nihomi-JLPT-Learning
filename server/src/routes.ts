@@ -4,6 +4,7 @@ import { db } from './db'
 import { requireAuth } from './middleware/requireAuth'
 import authRoutes from './routes/auth'
 import kanjiRoutes from './routes/kanji'
+import journeyRoutes from './routes/journey'
 
 const router = new Hono()
 
@@ -58,6 +59,9 @@ async function buildLevelCatalog(userId?: string) {
     if (index < currentIndex) progress = 100
     else if (index === currentIndex) progress = Math.max(0, Math.min(100, averageProgress))
 
+    const status: 'complete' | 'current' | 'upcoming' =
+      index < currentIndex ? 'complete' : index === currentIndex ? 'current' : 'upcoming'
+
     return {
       code: level,
       title: meta.title,
@@ -68,11 +72,313 @@ async function buildLevelCatalog(userId?: string) {
       colorBorder: `${meta.color}33`,
       badge: `badge-${level.toLowerCase()}`,
       emoji: meta.emoji,
-      kanji: kanjiCount,
-      vocab: vocabCount,
-      grammar: grammarCount,
+      stats: { kanji: kanjiCount, vocab: vocabCount, grammar: grammarCount },
       progress,
+      status,
       current: index === currentIndex,
+    }
+  })
+}
+
+// Real, level-appropriate content totals — cumulative counts of kanji/vocab/grammar
+// from N5 up through targetLevel, computed from actual DB content rather than
+// hardcoded numbers (which drift out of sync with the real content and don't
+// vary by level, e.g. showing an N5 learner's kanji mastery against the N3 total).
+async function getCumulativeContentTotals(targetLevel: (typeof LEVEL_ORDER)[number]) {
+  const [vocabularyCounts, kanjiCounts, grammarCounts] = await Promise.all([
+    db.vocabulary.groupBy({ by: ['level'], _count: { id: true } }),
+    db.kanjiEntry.groupBy({ by: ['level'], _count: { id: true } }),
+    db.grammarPattern.groupBy({ by: ['level'], _count: { id: true } }),
+  ])
+
+  const vocabMap = Object.fromEntries(vocabularyCounts.map((entry) => [normalizeLevelCode(entry.level), entry._count.id]))
+  const kanjiMap = Object.fromEntries(kanjiCounts.map((entry) => [normalizeLevelCode(entry.level), entry._count.id]))
+  const grammarMap = Object.fromEntries(grammarCounts.map((entry) => [normalizeLevelCode(entry.level), entry._count.id]))
+
+  const levelsUpToTarget = LEVEL_ORDER.slice(0, LEVEL_ORDER.indexOf(targetLevel) + 1)
+  const sum = (map: Record<string, number>) => levelsUpToTarget.reduce((total, level) => total + (map[level] ?? 0), 0)
+
+  return { kanji: sum(kanjiMap), vocabulary: sum(vocabMap), grammar: sum(grammarMap) }
+}
+
+type AchievementContext = {
+  lessonCount: number
+  streakDays: number
+  xp: number
+  reviewCount: number
+  uniqueKanjiCount: number
+  uniqueVocabularyCount: number
+  studyLevel: string
+  completedChapterIds: Set<string>
+  earnedAchievementIds: Set<string>
+}
+
+type AchievementDefinition = {
+  id: string
+  title: string
+  desc: string
+  icon: string
+  rarity: string
+  xp: number
+  evaluate: (context: AchievementContext) => { earned: boolean; progress: number; current: number; goal: number }
+}
+
+const ACHIEVEMENT_DEFINITIONS: AchievementDefinition[] = [
+  {
+    id: 'first_lesson',
+    title: 'First Step',
+    desc: 'Complete your first lesson.',
+    icon: '🌱',
+    rarity: 'Common',
+    xp: 50,
+    evaluate: ({ lessonCount }) => ({ earned: lessonCount > 0, progress: Math.min(100, (lessonCount / 1) * 100), current: lessonCount, goal: 1 }),
+  },
+  {
+    id: 'streak_7',
+    title: 'Week Warrior',
+    desc: 'Maintain a 7-day study streak.',
+    icon: '🔥',
+    rarity: 'Uncommon',
+    xp: 100,
+    evaluate: ({ streakDays }) => ({ earned: streakDays >= 7, progress: Math.min(100, (streakDays / 7) * 100), current: streakDays, goal: 7 }),
+  },
+  {
+    id: 'streak_30',
+    title: 'Monthly Master',
+    desc: 'Maintain a 30-day study streak.',
+    icon: '🗓',
+    rarity: 'Rare',
+    xp: 300,
+    evaluate: ({ streakDays }) => ({ earned: streakDays >= 30, progress: Math.min(100, (streakDays / 30) * 100), current: streakDays, goal: 30 }),
+  },
+  {
+    id: 'card_collector',
+    title: 'Card Collector',
+    desc: 'Review 100 flashcards.',
+    icon: '🃏',
+    rarity: 'Common',
+    xp: 75,
+    evaluate: ({ reviewCount }) => ({ earned: reviewCount >= 100, progress: Math.min(100, (reviewCount / 100) * 100), current: reviewCount, goal: 100 }),
+  },
+  {
+    id: 'kanji_50',
+    title: 'Kanji Collector',
+    desc: 'Study 50 unique kanji.',
+    icon: '字',
+    rarity: 'Common',
+    xp: 75,
+    evaluate: ({ uniqueKanjiCount }) => ({ earned: uniqueKanjiCount >= 50, progress: Math.min(100, (uniqueKanjiCount / 50) * 100), current: uniqueKanjiCount, goal: 50 }),
+  },
+  {
+    id: 'kanji_200',
+    title: 'Kanji Scholar',
+    desc: 'Study 200 unique kanji.',
+    icon: '🏛',
+    rarity: 'Epic',
+    xp: 500,
+    evaluate: ({ uniqueKanjiCount }) => ({ earned: uniqueKanjiCount >= 200, progress: Math.min(100, (uniqueKanjiCount / 200) * 100), current: uniqueKanjiCount, goal: 200 }),
+  },
+  {
+    id: 'journey_welcome',
+    title: 'Welcome to Japan',
+    desc: 'Began the Beginner Journey.',
+    icon: '✈️',
+    rarity: 'Common',
+    xp: 50,
+    evaluate: ({ completedChapterIds }) => ({ earned: completedChapterIds.has('welcome'), progress: completedChapterIds.has('welcome') ? 100 : 0, current: completedChapterIds.has('welcome') ? 1 : 0, goal: 1 }),
+  },
+  {
+    id: 'journey_jlpt_map',
+    title: 'Path Finder',
+    desc: 'Learned what the JLPT levels mean.',
+    icon: '🗺️',
+    rarity: 'Common',
+    xp: 40,
+    evaluate: ({ completedChapterIds }) => ({ earned: completedChapterIds.has('jlpt-overview'), progress: completedChapterIds.has('jlpt-overview') ? 100 : 0, current: completedChapterIds.has('jlpt-overview') ? 1 : 0, goal: 1 }),
+  },
+  {
+    id: 'journey_hiragana',
+    title: 'First Japanese Character',
+    desc: 'Learned your first 10 hiragana.',
+    icon: '🌸',
+    rarity: 'Uncommon',
+    xp: 75,
+    evaluate: ({ completedChapterIds }) => ({ earned: completedChapterIds.has('first-hiragana'), progress: completedChapterIds.has('first-hiragana') ? 100 : 0, current: completedChapterIds.has('first-hiragana') ? 1 : 0, goal: 1 }),
+  },
+  {
+    id: 'journey_katakana',
+    title: 'Katakana Explorer',
+    desc: 'Learned your first katakana.',
+    icon: '🗾',
+    rarity: 'Uncommon',
+    xp: 75,
+    evaluate: ({ completedChapterIds }) => ({ earned: completedChapterIds.has('first-katakana'), progress: completedChapterIds.has('first-katakana') ? 100 : 0, current: completedChapterIds.has('first-katakana') ? 1 : 0, goal: 1 }),
+  },
+  {
+    id: 'journey_kanji',
+    title: 'First Kanji Master',
+    desc: 'Learned your first 5 kanji.',
+    icon: '🖌',
+    rarity: 'Uncommon',
+    xp: 75,
+    evaluate: ({ completedChapterIds }) => ({ earned: completedChapterIds.has('first-kanji'), progress: completedChapterIds.has('first-kanji') ? 100 : 0, current: completedChapterIds.has('first-kanji') ? 1 : 0, goal: 1 }),
+  },
+  {
+    id: 'journey_conversationalist',
+    title: 'Conversationalist',
+    desc: 'Completed every beginner dialogue scenario.',
+    icon: '💬',
+    rarity: 'Rare',
+    xp: 120,
+    evaluate: ({ completedChapterIds }) => ({ earned: completedChapterIds.has('daily-conversation'), progress: completedChapterIds.has('daily-conversation') ? 100 : 0, current: completedChapterIds.has('daily-conversation') ? 1 : 0, goal: 1 }),
+  },
+  {
+    id: 'journey_culture',
+    title: 'Culture Explorer',
+    desc: 'Explored Japanese culture and customs.',
+    icon: '🎌',
+    rarity: 'Uncommon',
+    xp: 60,
+    evaluate: ({ completedChapterIds }) => ({ earned: completedChapterIds.has('japanese-culture'), progress: completedChapterIds.has('japanese-culture') ? 100 : 0, current: completedChapterIds.has('japanese-culture') ? 1 : 0, goal: 1 }),
+  },
+  {
+    id: 'journey_graduate',
+    title: 'Beginner Journey Graduate',
+    desc: 'Completed the entire Beginner Journey.',
+    icon: '🎉',
+    rarity: 'Rare',
+    xp: 100,
+    evaluate: ({ completedChapterIds }) => ({ earned: completedChapterIds.has('complete'), progress: completedChapterIds.has('complete') ? 100 : 0, current: completedChapterIds.has('complete') ? 1 : 0, goal: 1 }),
+  },
+  {
+    id: 'test_pass_n5',
+    title: 'N5 Certified',
+    desc: 'Score 90%+ on an N5 mock test.',
+    icon: '📋',
+    rarity: 'Uncommon',
+    xp: 150,
+    evaluate: () => ({ earned: false, progress: 0, current: 0, goal: 1 }),
+  },
+  {
+    id: 'n5_complete',
+    title: 'N5 Graduate',
+    desc: 'Complete all N5 lessons.',
+    icon: '🎓',
+    rarity: 'Rare',
+    xp: 200,
+    evaluate: ({ lessonCount, studyLevel }) => ({ earned: lessonCount > 0 && ['N4', 'N3', 'N2', 'N1'].includes(studyLevel), progress: Math.min(100, (lessonCount / 8) * 100), current: lessonCount, goal: 8 }),
+  },
+  {
+    id: 'n1_complete',
+    title: 'Fluency Achieved',
+    desc: 'Complete all N1 lessons.',
+    icon: '🏆',
+    rarity: 'Legendary',
+    xp: 2000,
+    evaluate: ({ studyLevel }) => ({ earned: studyLevel === 'N1', progress: studyLevel === 'N1' ? 100 : 0, current: studyLevel === 'N1' ? 1 : 0, goal: 1 }),
+  },
+]
+
+async function getAchievementContext(userId: string) {
+  const [user, earnedRows, lessonHistory, flashcardRows, journeyProgressRows] = await Promise.all([
+    db.user.findUnique({
+      where: { id: userId },
+      select: { studyLevel: true, xp: true, streakDays: true },
+    }),
+    db.userAchievement.findMany({ where: { userId }, select: { achievementId: true, earnedAt: true } }),
+    db.lessonHistory.findMany({ where: { userId }, select: { id: true } }),
+    db.flashcardReview.findMany({ where: { userId }, select: { reviewCount: true, kanjiId: true, vocabularyId: true } }),
+    db.journeyProgress.findMany({ where: { userId }, select: { chapterId: true } }),
+  ])
+
+  const reviewCount = flashcardRows.reduce((sum, row) => sum + (row.reviewCount ?? 0), 0)
+  const uniqueKanjiCount = new Set(flashcardRows.filter((row) => row.kanjiId).map((row) => row.kanjiId)).size
+  const uniqueVocabularyCount = new Set(flashcardRows.filter((row) => row.vocabularyId).map((row) => row.vocabularyId)).size
+
+  return {
+    user,
+    earnedRows,
+    lessonCount: lessonHistory.length,
+    streakDays: user?.streakDays ?? 0,
+    xp: user?.xp ?? 0,
+    reviewCount,
+    uniqueKanjiCount,
+    uniqueVocabularyCount,
+    studyLevel: user?.studyLevel ?? 'N5',
+    completedChapterIds: new Set(journeyProgressRows.map((row) => row.chapterId)),
+  }
+}
+
+async function buildAchievementPayload(userId: string) {
+  const context = await getAchievementContext(userId)
+  const earnedById = new Map(context.earnedRows.map((row) => [row.achievementId, row.earnedAt]))
+  const earnedAchievementIds = new Set(context.earnedRows.map((row) => row.achievementId))
+  const newlyUnlocked: string[] = []
+
+  for (const definition of ACHIEVEMENT_DEFINITIONS) {
+    const state = definition.evaluate({
+      lessonCount: context.lessonCount,
+      streakDays: context.streakDays,
+      xp: context.xp,
+      reviewCount: context.reviewCount,
+      uniqueKanjiCount: context.uniqueKanjiCount,
+      uniqueVocabularyCount: context.uniqueVocabularyCount,
+      studyLevel: context.studyLevel,
+      completedChapterIds: context.completedChapterIds,
+      earnedAchievementIds,
+    })
+
+    if (state.earned && !earnedAchievementIds.has(definition.id)) {
+      newlyUnlocked.push(definition.id)
+    }
+  }
+
+  if (newlyUnlocked.length) {
+    const xpAward = newlyUnlocked.reduce((sum, achievementId) => {
+      const definition = ACHIEVEMENT_DEFINITIONS.find((entry) => entry.id === achievementId)
+      return sum + (definition?.xp ?? 0)
+    }, 0)
+
+    await db.userAchievement.createMany({
+      data: newlyUnlocked.map((achievementId) => ({ userId, achievementId })),
+      skipDuplicates: true,
+    })
+
+    if (xpAward > 0) {
+      await db.user.update({ where: { id: userId }, data: { xp: { increment: xpAward } } })
+    }
+  }
+
+  const refreshedRows = await db.userAchievement.findMany({ where: { userId }, select: { achievementId: true, earnedAt: true } })
+  const refreshedMap = new Map(refreshedRows.map((row) => [row.achievementId, row.earnedAt]))
+  const refreshedIds = new Set(refreshedRows.map((row) => row.achievementId))
+
+  return ACHIEVEMENT_DEFINITIONS.map((definition) => {
+    const state = definition.evaluate({
+      lessonCount: context.lessonCount,
+      streakDays: context.streakDays,
+      xp: context.xp,
+      reviewCount: context.reviewCount,
+      uniqueKanjiCount: context.uniqueKanjiCount,
+      uniqueVocabularyCount: context.uniqueVocabularyCount,
+      studyLevel: context.studyLevel,
+      completedChapterIds: context.completedChapterIds,
+      earnedAchievementIds: refreshedIds,
+    })
+
+    const earned = refreshedIds.has(definition.id) || state.earned
+    return {
+      id: definition.id,
+      title: definition.title,
+      desc: definition.desc,
+      icon: definition.icon,
+      rarity: definition.rarity,
+      xp: definition.xp,
+      earned,
+      date: earned ? refreshedMap.get(definition.id)?.toISOString() ?? null : null,
+      progress: state.progress,
+      goal: state.goal,
+      current: state.current,
     }
   })
 }
@@ -82,6 +388,7 @@ async function buildLevelCatalog(userId?: string) {
 router.route('/auth', authRoutes)
 router.route('/api/kanji', kanjiRoutes)
 router.route('/api/v1/kanji', kanjiRoutes)
+router.route('/api/v1/journey', journeyRoutes)
 
 // ── Health ───────────────────────────────────────────────────────────────────
 
@@ -117,42 +424,37 @@ router.get('/api/v1/dashboard', requireAuth, async (c) => {
     : 'N5'
   const targetIndex = levelOrder.indexOf(targetLevel)
 
-  const targetMeta: Record<string, { focus: string; weeklyGoal: number; baseMastery: { kanji: number; vocabulary: number; grammar: number; reading: number } }> = {
-    N5: { focus: 'Build the basics: hiragana, katakana, simple grammar, and everyday vocabulary.', weeklyGoal: 300, baseMastery: { kanji: 10, vocabulary: 8, grammar: 7, reading: 6 } },
-    N4: { focus: 'Strengthen everyday communication and more practical sentence patterns.', weeklyGoal: 400, baseMastery: { kanji: 16, vocabulary: 14, grammar: 12, reading: 10 } },
-    N3: { focus: 'Improve reading, listening, and intermediate grammar for everyday and media contexts.', weeklyGoal: 500, baseMastery: { kanji: 22, vocabulary: 20, grammar: 18, reading: 15 } },
-    N2: { focus: 'Handle longer passages, richer vocabulary, and natural speech patterns.', weeklyGoal: 600, baseMastery: { kanji: 30, vocabulary: 28, grammar: 24, reading: 20 } },
-    N1: { focus: 'Aim for near-native fluency, nuanced reading, and advanced listening.', weeklyGoal: 700, baseMastery: { kanji: 38, vocabulary: 34, grammar: 30, reading: 26 } },
+  const targetMeta: Record<string, { focus: string; weeklyGoal: number; baseMastery: { kanji: number; vocabulary: number; grammar: number } }> = {
+    N5: { focus: 'Build the basics: hiragana, katakana, simple grammar, and everyday vocabulary.', weeklyGoal: 300, baseMastery: { kanji: 10, vocabulary: 8, grammar: 7 } },
+    N4: { focus: 'Strengthen everyday communication and more practical sentence patterns.', weeklyGoal: 400, baseMastery: { kanji: 16, vocabulary: 14, grammar: 12 } },
+    N3: { focus: 'Improve reading, listening, and intermediate grammar for everyday and media contexts.', weeklyGoal: 500, baseMastery: { kanji: 22, vocabulary: 20, grammar: 18 } },
+    N2: { focus: 'Handle longer passages, richer vocabulary, and natural speech patterns.', weeklyGoal: 600, baseMastery: { kanji: 30, vocabulary: 28, grammar: 24 } },
+    N1: { focus: 'Aim for near-native fluency, nuanced reading, and advanced listening.', weeklyGoal: 700, baseMastery: { kanji: 38, vocabulary: 34, grammar: 30 } },
   }
 
   const target = targetMeta[targetLevel] ?? targetMeta.N5
+  const contentTotals = await getCumulativeContentTotals(targetLevel)
 
-  const vocabTotals: Record<(typeof levelOrder)[number], number> = {
-    N5: 662,
-    N4: 1294,
-    N3: 3078,
-    N2: 4871,
-    N1: 8334,
-  }
-  const vocabTotal = vocabTotals[targetLevel] ?? 8334
-
-  const boostFromActivity = Math.min(20, user._count.lessonHistory * 2 + user.streakDays + Math.floor(user.xp / 200))
+  // Mastery must only move in response to real learning activity (completed lessons,
+  // recorded per-category progress) — never from XP alone, since XP also accrues from
+  // non-learning sources like the Beginner Journey onboarding rewards.
+  const boostFromActivity = Math.min(20, user._count.lessonHistory * 2 + user.streakDays)
   const masterySeed = {
     kanji: Math.min(95, target.baseMastery.kanji + boostFromActivity + (progressMap.kanji ?? 0) * 0.2),
     vocabulary: Math.min(95, target.baseMastery.vocabulary + boostFromActivity + (progressMap.vocabulary ?? 0) * 0.2),
     grammar: Math.min(95, target.baseMastery.grammar + boostFromActivity + (progressMap.grammar ?? 0) * 0.2),
-    reading: Math.min(95, target.baseMastery.reading + boostFromActivity + (progressMap.reading ?? 0) * 0.2),
   }
 
-  // If the user is brand-new (no lessons, no XP, no streak and no recorded progress)
-  // treat mastery as empty so the UI shows a clear starting point instead of pre-filled values.
-  const isNewUser = user._count.lessonHistory === 0 && user.xp === 0 && user.streakDays === 0 && Object.values(progressMap).every(v => !v)
-  if (isNewUser) {
+  // A user hasn't "started learning" until they have a completed lesson or recorded
+  // progress — XP and streak alone (which the Beginner Journey can raise on its own)
+  // don't count, so mastery stays at a clean 0 until real study begins.
+  const hasStartedLearning = user._count.lessonHistory > 0 || Object.values(progressMap).some((v) => v)
+  if (!hasStartedLearning) {
     masterySeed.kanji = 0
     masterySeed.vocabulary = 0
     masterySeed.grammar = 0
-    masterySeed.reading = 0
   }
+  const isNewUser = !hasStartedLearning
 
   const toRelativeTime = (value: Date | string) => {
     const diffMinutes = Math.max(1, Math.round((Date.now() - new Date(value).getTime()) / 60000))
@@ -171,13 +473,16 @@ router.get('/api/v1/dashboard', requireAuth, async (c) => {
   })
 
   const mastery = [
-    { label: 'Kanji', done: Math.round(650 * (masterySeed.kanji / 100)), total: 650, pct: Math.round(masterySeed.kanji), color: '#c97a4a' },
-    { label: 'Vocabulary', done: Math.round(vocabTotal * (masterySeed.vocabulary / 100)), total: vocabTotal, pct: Math.round(masterySeed.vocabulary), color: '#8b6f8b' },
-    { label: 'Grammar', done: Math.round(120 * (masterySeed.grammar / 100)), total: 120, pct: Math.round(masterySeed.grammar), color: '#7d8d6a' },
-    { label: 'Reading', done: Math.round(40 * (masterySeed.reading / 100)), total: 40, pct: Math.round(masterySeed.reading), color: '#5b8fa8' },
+    { label: 'Kanji', done: Math.round(contentTotals.kanji * (masterySeed.kanji / 100)), total: contentTotals.kanji, pct: Math.round(masterySeed.kanji), color: '#c97a4a' },
+    { label: 'Vocabulary', done: Math.round(contentTotals.vocabulary * (masterySeed.vocabulary / 100)), total: contentTotals.vocabulary, pct: Math.round(masterySeed.vocabulary), color: '#8b6f8b' },
+    { label: 'Grammar', done: Math.round(contentTotals.grammar * (masterySeed.grammar / 100)), total: contentTotals.grammar, pct: Math.round(masterySeed.grammar), color: '#7d8d6a' },
   ]
 
-  const readiness = Math.min(100, Math.round((user.xp / 20) + (user.streakDays * 4) + (user._count.lessonHistory * 2) + (targetIndex * 6)))
+  // Same rule as mastery: readiness reflects real study (lessons, streak, recorded
+  // progress), never raw XP — otherwise Beginner Journey rewards would move it too.
+  const readiness = hasStartedLearning
+    ? Math.min(100, Math.round((user.streakDays * 4) + (user._count.lessonHistory * 2) + (targetIndex * 6)))
+    : 0
 
   return c.json({
     message: `Welcome back, ${user.username}!`,
@@ -214,6 +519,16 @@ router.get('/api/v1/dashboard', requireAuth, async (c) => {
   })
 })
 
+// ── Roadmap (real DB — per-level status/progress/content counts + real total XP)
+router.get('/api/v1/roadmap', requireAuth, async (c) => {
+  const userId = c.get('userId') as string
+  const [levels, user] = await Promise.all([
+    buildLevelCatalog(userId),
+    db.user.findUnique({ where: { id: userId }, select: { xp: true } }),
+  ])
+  return c.json({ levels, totalXp: user?.xp ?? 0 })
+})
+
 // ── Levels ───────────────────────────────────────────────────────────────────
 
 router.get('/api/v1/levels', requireAuth, async (c) => {
@@ -238,9 +553,9 @@ router.get('/api/v1/levels/:levelId', requireAuth, async (c) => {
       'Track progress for this level',
     ],
     topics: [
-      `Database vocabulary entries: ${detail.vocab}`,
-      `Database kanji entries: ${detail.kanji}`,
-      `Database grammar patterns: ${detail.grammar}`,
+      `Database vocabulary entries: ${detail.stats.vocab}`,
+      `Database kanji entries: ${detail.stats.kanji}`,
+      `Database grammar patterns: ${detail.stats.grammar}`,
       `Current progress: ${detail.progress}%`,
     ],
   })
@@ -388,29 +703,169 @@ router.get('/api/v1/grammar', requireAuth, async (c) => {
 
 // ── Flashcards / SRS ──────────────────────────────────────────────────────────
 
-router.get('/api/v1/flashcards', (c) => {
-  const level = c.req.query('level')
-  const deck = [
-    { id: 1, front: '食べる', frontReading: 'たべる', back: 'to eat', example: '毎日ご飯を食べる。', level: 'N5', srsStage: 2, nextReview: '2026-07-01' },
-    { id: 2, front: '大きい', frontReading: 'おおきい', back: 'big / large', example: '大きい犬がいる。', level: 'N5', srsStage: 1, nextReview: '2026-07-01' },
-    { id: 3, front: '電車', frontReading: 'でんしゃ', back: 'train', example: '電車で行きます。', level: 'N4', srsStage: 0, nextReview: '2026-06-30' },
-    { id: 4, front: '静か', frontReading: 'しずか', back: 'quiet', example: '図書館は静かです。', level: 'N5', srsStage: 3, nextReview: '2026-07-03' },
-    { id: 5, front: '勉強', frontReading: 'べんきょう', back: 'study', example: '毎日勉強します。', level: 'N5', srsStage: 1, nextReview: '2026-07-01' },
-    { id: 6, front: '場合', frontReading: 'ばあい', back: 'case / situation', example: 'その場合はどうしますか。', level: 'N3', srsStage: 0, nextReview: '2026-06-30' },
-  ]
-  let result = deck
-  if (level) result = result.filter(c => c.level === level)
-  return c.json({ deck: result, due: result.filter(c => c.srsStage <= 1).length })
+const FLASHCARD_BATCH_SIZE = 12
+const FLASHCARD_LEVELS = ['N5', 'N4', 'N3', 'N2', 'N1'] as const
+
+function vocabToCard(v: { id: string; word: string; reading: string; meaning: string; level: string; example: string | null }) {
+  return {
+    // A slice of seed data has an empty `reading` (usually because the word is
+    // already pure kana) — fall back to the word itself rather than show a blank line.
+    id: `vocab:${v.id}`, cardType: 'vocabulary', front: v.word, frontReading: v.reading || v.word,
+    back: v.meaning, example: v.example ?? '', level: v.level?.toUpperCase() ?? 'N5',
+    isNew: true, reviewCount: 0,
+  }
+}
+
+function kanjiToCard(k: { id: string; character: string; kunReadings: string[]; onReadings: string[]; meaning: string; level: string }) {
+  return {
+    id: `kanji:${k.id}`, cardType: 'kanji', front: k.character,
+    frontReading: [...k.kunReadings, ...k.onReadings].join('、'),
+    back: k.meaning, example: '', level: k.level?.toUpperCase() ?? 'N5',
+    isNew: true, reviewCount: 0,
+  }
+}
+
+// GET /api/v1/flashcards — real due-card queue: cards the user has reviewed before
+// that are due again, topped up with fresh cards from the vocabulary/kanji banks at
+// their level. Nothing here is hardcoded or mocked.
+router.get('/api/v1/flashcards', requireAuth, async (c) => {
+  const userId = c.get('userId') as string
+  const now = new Date()
+
+  const [user, dueReviews, allUserReviews] = await Promise.all([
+    db.user.findUnique({ where: { id: userId }, select: { studyLevel: true } }),
+    db.flashcardReview.findMany({
+      where: { userId, nextReview: { lte: now } },
+      include: { vocabulary: true, kanji: true },
+      orderBy: { nextReview: 'asc' },
+      take: FLASHCARD_BATCH_SIZE,
+    }),
+    db.flashcardReview.findMany({ where: { userId }, select: { vocabularyId: true, kanjiId: true } }),
+  ])
+
+  const queryLevel = c.req.query('level')?.toUpperCase()
+  const level = FLASHCARD_LEVELS.includes(queryLevel as (typeof FLASHCARD_LEVELS)[number])
+    ? queryLevel!
+    : (user?.studyLevel ?? 'N5')
+
+  const seenVocabIds = allUserReviews.map((r) => r.vocabularyId).filter((id): id is string => Boolean(id))
+  const seenKanjiIds = allUserReviews.map((r) => r.kanjiId).filter((id): id is string => Boolean(id))
+
+  const dueCards = dueReviews
+    .filter((r) => r.vocabulary || r.kanji)
+    .map((r) => {
+      const card = r.vocabulary ? vocabToCard(r.vocabulary) : kanjiToCard(r.kanji!)
+      return { ...card, isNew: false, reviewCount: r.reviewCount }
+    })
+
+  const remainingSlots = Math.max(0, FLASHCARD_BATCH_SIZE - dueCards.length)
+  const vocabSlots = Math.ceil(remainingSlots * 0.7)
+  const kanjiSlots = remainingSlots - vocabSlots
+
+  const [newVocab, newKanji, totalDue] = await Promise.all([
+    remainingSlots > 0
+      ? db.vocabulary.findMany({ where: { level, id: { notIn: seenVocabIds } }, take: vocabSlots })
+      : Promise.resolve([]),
+    remainingSlots > 0
+      ? db.kanjiEntry.findMany({ where: { level, id: { notIn: seenKanjiIds } }, take: kanjiSlots })
+      : Promise.resolve([]),
+    db.flashcardReview.count({ where: { userId, nextReview: { lte: now } } }),
+  ])
+
+  const newCards = [...newVocab.map(vocabToCard), ...newKanji.map(kanjiToCard)]
+
+  return c.json({ deck: [...dueCards, ...newCards], due: totalDue, newCount: newCards.length, level })
 })
 
-router.post('/api/v1/flashcards/:id/review', async (c) => {
-  const id = c.req.param('id')
-  const body = await c.req.json() as { rating: 'again' | 'hard' | 'good' | 'easy' }
-  const intervalMap = { again: 1, hard: 3, good: 7, easy: 14 }
-  const nextDays = intervalMap[body.rating] ?? 1
-  const nextDate = new Date()
-  nextDate.setDate(nextDate.getDate() + nextDays)
-  return c.json({ id, rating: body.rating, nextReview: nextDate.toISOString().split('T')[0], xpGained: body.rating === 'easy' ? 10 : body.rating === 'good' ? 7 : 3 })
+// POST /api/v1/flashcards/:id/review — persists a real SM-2-style spaced-repetition
+// update to FlashcardReview, keyed by the card id (`vocab:<id>` or `kanji:<id>`).
+router.post('/api/v1/flashcards/:id/review', requireAuth, async (c) => {
+  const userId = c.get('userId') as string
+  const cardId = c.req.param('id') ?? ''
+  const [cardType, contentId] = cardId.split(':')
+
+  if (!contentId || (cardType !== 'vocab' && cardType !== 'kanji')) {
+    return c.json({ error: 'Invalid card id' }, 400)
+  }
+
+  let body: { rating?: string }
+  try {
+    body = await c.req.json()
+  } catch {
+    return c.json({ error: 'Invalid JSON body' }, 400)
+  }
+  const rating = body.rating
+  if (!rating || !['again', 'hard', 'good', 'easy'].includes(rating)) {
+    return c.json({ error: 'rating must be one of again, hard, good, easy' }, 400)
+  }
+
+  const isVocab = cardType === 'vocab'
+  const existing = await db.flashcardReview.findUnique({
+    where: isVocab
+      ? { userId_vocabularyId: { userId, vocabularyId: contentId } }
+      : { userId_kanjiId: { userId, kanjiId: contentId } },
+  })
+
+  const prevInterval = existing?.interval ?? 1
+  const prevEase = existing?.easeFactor ?? 2.5
+
+  let interval: number
+  let easeFactor = prevEase
+  if (rating === 'again') {
+    interval = 1
+    easeFactor = Math.max(1.3, prevEase - 0.2)
+  } else if (rating === 'hard') {
+    interval = Math.max(1, Math.round(prevInterval * 1.2))
+    easeFactor = Math.max(1.3, prevEase - 0.15)
+  } else if (rating === 'good') {
+    interval = Math.max(1, Math.round(prevInterval * prevEase))
+  } else {
+    interval = Math.max(1, Math.round(prevInterval * prevEase * 1.3))
+    easeFactor = prevEase + 0.15
+  }
+
+  const nextReview = new Date()
+  nextReview.setDate(nextReview.getDate() + interval)
+
+  const baseData = {
+    cardType: isVocab ? 'vocabulary' : 'kanji',
+    interval,
+    easeFactor,
+    nextReview,
+    lastRating: rating,
+    reviewCount: { increment: 1 },
+    ...(rating === 'again' ? { lapses: { increment: 1 } } : {}),
+  }
+
+  await db.flashcardReview.upsert({
+    where: isVocab
+      ? { userId_vocabularyId: { userId, vocabularyId: contentId } }
+      : { userId_kanjiId: { userId, kanjiId: contentId } },
+    create: {
+      userId,
+      vocabularyId: isVocab ? contentId : null,
+      kanjiId: isVocab ? null : contentId,
+      cardType: isVocab ? 'vocabulary' : 'kanji',
+      interval,
+      easeFactor,
+      nextReview,
+      lastRating: rating,
+      reviewCount: 1,
+    },
+    update: baseData,
+  })
+
+  const xpGained = rating === 'easy' ? 10 : rating === 'good' ? 7 : rating === 'hard' ? 4 : 2
+  await db.user.update({ where: { id: userId }, data: { xp: { increment: xpGained } } })
+  await buildAchievementPayload(userId)
+
+  return c.json({
+    id: cardId,
+    rating,
+    interval,
+    nextReview: nextReview.toISOString().split('T')[0],
+    xpGained,
+  })
 })
 
 // ── Practice ─────────────────────────────────────────────────────────────────
@@ -478,15 +933,17 @@ router.get('/api/v1/progress', requireAuth, async (c) => {
   const userId = c.get('userId') as string
   // Fetch user basic stats and progress entries
   const [user, progressEntries, lessons] = await Promise.all([
-    db.user.findUnique({ where: { id: userId }, select: { xp: true, streakDays: true, _count: { select: { lessonHistory: true } } } }),
+    db.user.findUnique({ where: { id: userId }, select: { xp: true, streakDays: true, studyLevel: true, _count: { select: { lessonHistory: true } } } }),
     db.userProgress.findMany({ where: { userId }, select: { category: true, mastery: true } }),
     db.lessonHistory.findMany({ where: { userId }, orderBy: { completedAt: 'desc' }, take: 12, select: { lessonId: true, xpGained: true, completedAt: true } }),
   ])
 
   if (!user) return c.json({ error: 'User not found' }, 404)
 
-  // Map progress entries to mastery structure
-  const totals: Record<string, number> = { Kanji: 650, Vocabulary: 8334, Grammar: 120, Reading: 40, Listening: 36 }
+  // Map progress entries to mastery structure — Kanji/Vocabulary/Grammar totals are
+  // real, level-appropriate content counts (not hardcoded), same as the dashboard.
+  const contentTotals = await getCumulativeContentTotals(normalizeLevelCode(user.studyLevel))
+  const totals: Record<string, number> = { Kanji: contentTotals.kanji, Vocabulary: contentTotals.vocabulary, Grammar: contentTotals.grammar }
   const mastery = progressEntries.map(p => {
     const label = p.category.charAt(0).toUpperCase() + p.category.slice(1)
     const total = totals[label] ?? null
@@ -521,41 +978,16 @@ router.get('/api/v1/progress', requireAuth, async (c) => {
 
 // ── Achievements ──────────────────────────────────────────────────────────────
 
-router.get('/api/v1/achievements', (c) => {
-  return c.json({
-    achievements: [
-      { id: 'first_lesson', title: 'First Step', desc: 'Complete your first lesson.', icon: '🌱', rarity: 'Common', xp: 50, earned: true, date: '2026-05-01' },
-      { id: 'streak_7', title: 'Week Warrior', desc: 'Maintain a 7-day study streak.', icon: '🔥', rarity: 'Uncommon', xp: 100, earned: true, date: '2026-05-10' },
-      { id: 'n5_complete', title: 'N5 Graduate', desc: 'Complete all N5 lessons.', icon: '🎓', rarity: 'Rare', xp: 200, earned: true, date: '2026-05-20' },
-      { id: 'kanji_50', title: 'Kanji Collector', desc: 'Study 50 unique kanji.', icon: '字', rarity: 'Common', xp: 75, earned: true, date: '2026-05-15' },
-      { id: 'test_pass_n5', title: 'N5 Certified', desc: 'Score 90%+ on an N5 mock test.', icon: '📋', rarity: 'Uncommon', xp: 150, earned: true, date: '2026-06-01' },
-      { id: 'streak_30', title: 'Monthly Master', desc: 'Maintain a 30-day study streak.', icon: '🗓', rarity: 'Rare', xp: 300, earned: false, date: null },
-      { id: 'kanji_200', title: 'Kanji Scholar', desc: 'Study 200 unique kanji.', icon: '🏛', rarity: 'Epic', xp: 500, earned: false, date: null },
-      { id: 'n1_complete', title: 'Fluency Achieved', desc: 'Complete all N1 lessons.', icon: '🏆', rarity: 'Legendary', xp: 2000, earned: false, date: null },
-    ],
-  })
+router.get('/api/v1/achievements', requireAuth, async (c) => {
+  const userId = c.get('userId') as string
+  return c.json({ achievements: await buildAchievementPayload(userId) })
 })
 
 // ── User achievements (earned) ───────────────────────────────────────────────
 router.get('/api/v1/user/achievements', requireAuth, async (c) => {
   const userId = c.get('userId') as string
-  const earned = await db.userAchievement.findMany({ where: { userId }, select: { achievementId: true, earnedAt: true } })
-
-  const master = [
-    { id: 'first_lesson', title: 'First Step', desc: 'Complete your first lesson.', icon: '🌱', rarity: 'Common', xp: 50 },
-    { id: 'streak_7', title: 'Week Warrior', desc: 'Maintain a 7-day study streak.', icon: '🔥', rarity: 'Uncommon', xp: 100 },
-    { id: 'n5_complete', title: 'N5 Graduate', desc: 'Complete all N5 lessons.', icon: '🎓', rarity: 'Rare', xp: 200 },
-    { id: 'kanji_50', title: 'Kanji Collector', desc: 'Study 50 unique kanji.', icon: '字', rarity: 'Common', xp: 75 },
-    { id: 'test_pass_n5', title: 'N5 Certified', desc: 'Score 90%+ on an N5 mock test.', icon: '📋', rarity: 'Uncommon', xp: 150 },
-    { id: 'streak_30', title: 'Monthly Master', desc: 'Maintain a 30-day study streak.', icon: '🗓', rarity: 'Rare', xp: 300 },
-    { id: 'kanji_200', title: 'Kanji Scholar', desc: 'Study 200 unique kanji.', icon: '🏛', rarity: 'Epic', xp: 500 },
-    { id: 'n1_complete', title: 'Fluency Achieved', desc: 'Complete all N1 lessons.', icon: '🏆', rarity: 'Legendary', xp: 2000 },
-  ]
-
-  const earnedIds = new Set(earned.map(e => e.achievementId))
-  const earnedList = master.filter(m => earnedIds.has(m.id)).map(m => ({ ...m, earned: true, date: earned.find(e => e.achievementId === m.id)?.earnedAt ?? null }))
-
-  return c.json({ achievements: earnedList })
+  const achievements = await buildAchievementPayload(userId)
+  return c.json({ achievements })
 })
 
 // ── Study Plan ────────────────────────────────────────────────────────────────

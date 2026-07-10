@@ -1,20 +1,7 @@
+import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Link } from 'react-router-dom'
-
-const ACHIEVEMENTS = [
-  { id: 'a1', icon: '🌱', name: 'First Steps',        desc: 'Completed your first lesson',          earned: true,  date: '2026-05-15', xp: 50,  rarity: 'Common'  },
-  { id: 'a2', icon: '🔥', name: '7-Day Streak',        desc: 'Studied 7 days in a row',              earned: true,  date: '2026-06-01', xp: 100, rarity: 'Uncommon' },
-  { id: 'a3', icon: '🃏', name: 'Card Collector',      desc: 'Reviewed 100 flashcards',              earned: true,  date: '2026-06-10', xp: 75,  rarity: 'Common'   },
-  { id: 'a4', icon: '📋', name: 'Test Taker',          desc: 'Completed first mock test',            earned: true,  date: '2026-06-22', xp: 150, rarity: 'Uncommon' },
-  { id: 'a5', icon: '⛩',  name: 'N5 Master',           desc: 'Achieved 95%+ on N5 mock test',        earned: true,  date: '2026-05-30', xp: 300, rarity: 'Rare'    },
-  { id: 'a6', icon: '字',  name: 'Kanji Explorer',      desc: 'Studied 100+ kanji characters',        earned: false, date: null,          xp: 200, rarity: 'Uncommon' },
-  { id: 'a7', icon: '📖', name: 'Reading Champion',    desc: 'Scored 80%+ on 5 reading sections',    earned: false, date: null,          xp: 250, rarity: 'Rare'    },
-  { id: 'a8', icon: '🎯', name: 'Exam Ready',          desc: 'Reached 80%+ JLPT readiness score',    earned: false, date: null,          xp: 500, rarity: 'Epic'    },
-  { id: 'a9', icon: '🌸', name: 'Sakura Scholar',      desc: 'Studied 30 days in a row',             earned: false, date: null,          xp: 400, rarity: 'Rare'    },
-  { id: 'a10',icon: '👑', name: 'N1 Champion',         desc: 'Achieved 90%+ on N1 mock test',        earned: false, date: null,          xp: 1000, rarity: 'Legendary' },
-  { id: 'a11',icon: '⭐', name: 'XP Milestone',        desc: 'Earned 1000 XP total',                 earned: true,  date: '2026-06-20', xp: 100, rarity: 'Uncommon' },
-  { id: 'a12',icon: '💬', name: 'Grammar Guru',        desc: 'Mastered 50+ grammar patterns',        earned: false, date: null,          xp: 300, rarity: 'Rare'    },
-]
+import api from '../lib/api'
 
 const RARITY_COLORS = {
   Common:    { color: '#6b7280', bg: 'rgba(107,114,128,0.10)' },
@@ -25,9 +12,43 @@ const RARITY_COLORS = {
 }
 
 export default function AchievementsPage() {
-  const earned  = ACHIEVEMENTS.filter(a => a.earned)
-  const pending = ACHIEVEMENTS.filter(a => !a.earned)
-  const totalXP = earned.reduce((s, a) => s + a.xp, 0)
+  const [achievements, setAchievements] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let isActive = true
+
+    const loadAchievements = async () => {
+      try {
+        setLoading(true)
+        const { data } = await api.get('/api/v1/achievements')
+        if (!isActive) return
+        setAchievements(data.achievements ?? [])
+        setError('')
+      } catch {
+        if (isActive) {
+          setError('Unable to load your live achievements right now.')
+        }
+      } finally {
+        if (isActive) {
+          setLoading(false)
+        }
+      }
+    }
+
+    loadAchievements()
+    const intervalId = window.setInterval(loadAchievements, 30000)
+
+    return () => {
+      isActive = false
+      window.clearInterval(intervalId)
+    }
+  }, [])
+
+  const earned = achievements.filter(a => a.earned)
+  const pending = achievements.filter(a => !a.earned)
+  const totalXP = earned.reduce((sum, a) => sum + (a.xp ?? 0), 0)
 
   return (
     <div className="page-shell">
@@ -41,7 +62,7 @@ export default function AchievementsPage() {
             <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--muted-plum)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Earned</div>
           </div>
           <div>
-            <div style={{ fontSize: '1.8rem', fontWeight: 900, color: 'var(--dark-ink)' }}>{ACHIEVEMENTS.length}</div>
+            <div style={{ fontSize: '1.8rem', fontWeight: 900, color: 'var(--dark-ink)' }}>{achievements.length}</div>
             <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--muted-plum)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Total</div>
           </div>
           <div>
@@ -51,6 +72,18 @@ export default function AchievementsPage() {
         </div>
         <span style={{ position: 'absolute', right: 24, top: '50%', transform: 'translateY(-50%)', fontSize: '7rem', fontWeight: 900, color: 'rgba(201,168,76,0.06)', pointerEvents: 'none' }}>🏆</span>
       </motion.div>
+
+      {error && (
+        <div className="clay-card" style={{ marginBottom: 14, padding: '10px 14px', color: 'var(--muted-plum)' }}>
+          {error}
+        </div>
+      )}
+
+      {loading && achievements.length === 0 && (
+        <div className="clay-card" style={{ marginBottom: 14, padding: '14px', color: 'var(--muted-plum)' }}>
+          Syncing your achievement progress…
+        </div>
+      )}
 
       {/* Earned */}
       <div>
@@ -70,12 +103,12 @@ export default function AchievementsPage() {
                 style={{ borderTop: `3px solid ${rarity.color}` }}
               >
                 <div style={{ fontSize: '2.4rem' }}>{a.icon}</div>
-                <div className="achievement-name">{a.name}</div>
+                <div className="achievement-name">{a.title}</div>
                 <div className="achievement-desc">{a.desc}</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center', marginTop: 4 }}>
                   <span style={{ fontSize: '0.68rem', fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: rarity.bg, color: rarity.color }}>{a.rarity}</span>
                   <span style={{ fontSize: '0.7rem', color: '#c9a84c', fontWeight: 700 }}>+{a.xp} XP</span>
-                  {a.date && <span style={{ fontSize: '0.65rem', color: 'var(--muted-plum)' }}>{a.date}</span>}
+                  {a.date && <span style={{ fontSize: '0.65rem', color: 'var(--muted-plum)' }}>{new Date(a.date).toLocaleDateString()}</span>}
                 </div>
               </motion.div>
             )
@@ -100,9 +133,19 @@ export default function AchievementsPage() {
                 transition={{ delay: i * 0.04 }}
               >
                 <div style={{ fontSize: '2.4rem', filter: 'grayscale(1)' }}>🔒</div>
-                <div className="achievement-name">{a.name}</div>
+                <div className="achievement-name">{a.title}</div>
                 <div className="achievement-desc">{a.desc}</div>
                 <span style={{ fontSize: '0.68rem', fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: rarity.bg, color: rarity.color, marginTop: 4 }}>{a.rarity}</span>
+                {a.goal > 0 && (
+                  <div style={{ width: '100%', marginTop: 8 }}>
+                    <div className="progress-bar-wrap">
+                      <div className="progress-bar-fill" style={{ width: `${Math.min(100, a.progress ?? 0)}%` }} />
+                    </div>
+                    <div style={{ fontSize: '0.68rem', color: 'var(--muted-plum)', marginTop: 4, textAlign: 'center' }}>
+                      {a.current ?? 0} / {a.goal ?? 0}
+                    </div>
+                  </div>
+                )}
               </motion.div>
             )
           })}

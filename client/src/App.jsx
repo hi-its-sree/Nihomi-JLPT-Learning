@@ -2,6 +2,8 @@ import { useState, lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Link, NavLink, Navigate, Outlet, useLocation } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
+import { JourneyProvider, useJourney } from './contexts/JourneyContext'
+import JourneyLayout from './components/journey/JourneyLayout'
 import './App.css'
 
 // Eager — always needed on first load
@@ -30,6 +32,19 @@ const AchievementsPage = lazy(() => import('./pages/AchievementsPage'))
 const SettingsPage     = lazy(() => import('./pages/SettingsPage'))
 const AboutPage        = lazy(() => import('./pages/AboutPage'))
 const ContactPage      = lazy(() => import('./pages/ContactPage'))
+
+// Beginner Journey — pre-N5 onboarding module
+const BeginnersGuidePage      = lazy(() => import('./pages/BeginnersGuidePage'))
+const WelcomeChapter          = lazy(() => import('./pages/journey/WelcomeChapter'))
+const JlptOverviewChapter     = lazy(() => import('./pages/journey/JlptOverviewChapter'))
+const WritingSystemsChapter   = lazy(() => import('./pages/journey/WritingSystemsChapter'))
+const HiraganaChapter         = lazy(() => import('./pages/journey/HiraganaChapter'))
+const KatakanaChapter         = lazy(() => import('./pages/journey/KatakanaChapter'))
+const KanjiChapter            = lazy(() => import('./pages/journey/KanjiChapter'))
+const StudyEffectivelyChapter = lazy(() => import('./pages/journey/StudyEffectivelyChapter'))
+const ConversationChapter     = lazy(() => import('./pages/journey/ConversationChapter'))
+const CultureChapter          = lazy(() => import('./pages/journey/CultureChapter'))
+const JourneyCompleteChapter  = lazy(() => import('./pages/journey/JourneyCompleteChapter'))
 
 function PageLoader() {
   return (
@@ -202,6 +217,34 @@ function AuthenticatedLayout() {
   )
 }
 
+const JOURNEY_ESCAPE_ROUTES = ['/settings', '/profile', '/achievements', '/about', '/contact']
+
+function JourneyGate({ children }) {
+  const { state, loading } = useJourney()
+  const location = useLocation()
+
+  if (loading) return children
+
+  const isJourneyRoute = location.pathname.startsWith('/beginners-guide') || location.pathname.startsWith('/journey')
+  const isEscapeRoute = JOURNEY_ESCAPE_ROUTES.some((r) => location.pathname.startsWith(r))
+  const needsOnboarding = !state.hasCompletedJourney && !state.hasSkippedJourney
+
+  if (needsOnboarding && !isJourneyRoute && !isEscapeRoute) {
+    return <Navigate to="/beginners-guide" replace />
+  }
+  return children
+}
+
+function JourneyLayoutRoute() {
+  return (
+    <JourneyLayout>
+      <Suspense fallback={<PageLoader />}>
+        <Outlet />
+      </Suspense>
+    </JourneyLayout>
+  )
+}
+
 function AppRoutes() {
   return (
     <Routes>
@@ -211,7 +254,7 @@ function AppRoutes() {
       <Route path="/home" element={<Suspense fallback={<PageLoader />}><HomePage /></Suspense>} />
 
       {/* Authenticated — shared topbar */}
-      <Route element={<ProtectedRoute><AuthenticatedLayout /></ProtectedRoute>}>
+      <Route element={<ProtectedRoute><JourneyGate><AuthenticatedLayout /></JourneyGate></ProtectedRoute>}>
         <Route path="/main" element={<MainLandingPage />} />
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/about" element={<AboutPage />} />
@@ -238,6 +281,22 @@ function AppRoutes() {
         <Route path="/achievements" element={<AchievementsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>
+
+      {/* Beginner Journey — own minimal chrome, no topbar/bottom-nav */}
+      <Route element={<ProtectedRoute><JourneyLayoutRoute /></ProtectedRoute>}>
+        <Route path="/beginners-guide" element={<BeginnersGuidePage />} />
+        <Route path="/journey/welcome" element={<WelcomeChapter />} />
+        <Route path="/journey/jlpt-overview" element={<JlptOverviewChapter />} />
+        <Route path="/journey/writing-systems" element={<WritingSystemsChapter />} />
+        <Route path="/journey/first-hiragana" element={<HiraganaChapter />} />
+        <Route path="/journey/first-katakana" element={<KatakanaChapter />} />
+        <Route path="/journey/first-kanji" element={<KanjiChapter />} />
+        <Route path="/journey/study-effectively" element={<StudyEffectivelyChapter />} />
+        <Route path="/journey/daily-conversation" element={<ConversationChapter />} />
+        <Route path="/journey/daily-conversation/:scenarioId" element={<ConversationChapter />} />
+        <Route path="/journey/japanese-culture" element={<CultureChapter />} />
+        <Route path="/journey/complete" element={<JourneyCompleteChapter />} />
+      </Route>
     </Routes>
   )
 }
@@ -245,9 +304,11 @@ function AppRoutes() {
 function App() {
   return (
     <AuthProvider>
-      <BrowserRouter>
-        <AppRoutes />
-      </BrowserRouter>
+      <JourneyProvider>
+        <BrowserRouter>
+          <AppRoutes />
+        </BrowserRouter>
+      </JourneyProvider>
     </AuthProvider>
   )
 }

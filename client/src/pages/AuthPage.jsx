@@ -8,11 +8,11 @@ const ART_KANJI = ['日', '本', '語', '学', '習', '文', '字', '書']
 export default function AuthPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [mode, setMode] = useState(searchParams.get('mode') === 'signup' ? 'signup' : 'login')
-  const [form, setForm] = useState({ email: '', password: '', username: '' })
+  const [form, setForm] = useState({ email: '', password: '', username: '', recoveryAnswers: ['', '', '', '', ''] })
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const navigate = useNavigate()
-  const { login, signup } = useAuth()
+  const { login, signup, forgotPassword } = useAuth()
 
   useEffect(() => {
     const m = searchParams.get('mode')
@@ -30,14 +30,23 @@ export default function AuthPage() {
     try {
       if (mode === 'login') {
         await login(form.email, form.password)
-      } else {
-        await signup(form.email, form.password, form.username)
+      } else if (mode === 'signup') {
+        await signup(form.email, form.password, form.username, form.recoveryAnswers)
+      } else if (mode === 'forgot') {
+        await forgotPassword(form.email, form.recoveryAnswers, form.password)
+        setMode('login')
+        setForm(prev => ({ ...prev, password: '', recoveryAnswers: ['', '', '', '', ''] }))
+        setError('Password updated successfully. Please sign in with your new password.')
       }
-      navigate('/dashboard')
-    } catch {
-      setError(mode === 'login'
+      if (mode !== 'forgot') {
+        navigate('/dashboard')
+      }
+    } catch (err) {
+      setError(err?.response?.data?.error || (mode === 'login'
         ? 'Invalid credentials. Please check your email and password.'
-        : 'Could not create account. Please try again.')
+        : mode === 'forgot'
+          ? 'We could not reset your password. Please try again.'
+          : 'Could not create account. Please try again.'))
     } finally {
       setSubmitting(false)
     }
@@ -45,9 +54,9 @@ export default function AuthPage() {
 
   function switchMode(next) {
     setMode(next)
-    setSearchParams({ mode: next })
+    setSearchParams({ mode: next === 'login' ? 'login' : next })
     setError('')
-    setForm({ email: '', password: '', username: '' })
+    setForm({ email: '', password: '', username: '', recoveryAnswers: ['', '', '', '', ''] })
   }
 
   return (
@@ -131,15 +140,17 @@ export default function AuthPage() {
 
             <div>
               <p className="eyebrow" style={{ color: 'var(--terracotta)' }}>
-                {mode === 'login' ? 'Welcome back' : 'Start learning'}
+                {mode === 'login' ? 'Welcome back' : mode === 'forgot' ? 'Recover your account' : 'Start learning'}
               </p>
               <h2 className="auth-card-title" style={{ marginTop: 8 }}>
-                {mode === 'login' ? 'Sign in to continue' : 'Create your account'}
+                {mode === 'login' ? 'Sign in to continue' : mode === 'forgot' ? 'Reset your password' : 'Create your account'}
               </h2>
               <p className="auth-card-sub" style={{ marginTop: 6 }}>
                 {mode === 'login'
                   ? 'Resume your study streak and pick up where you left off.'
-                  : 'Join thousands of learners on their path to JLPT success.'}
+                  : mode === 'forgot'
+                    ? 'Answer your five security questions to set a new password.'
+                    : 'Join thousands of learners on their path to JLPT success.'}
               </p>
             </div>
 
@@ -158,6 +169,33 @@ export default function AuthPage() {
                 </label>
               )}
 
+              {(mode === 'signup' || mode === 'forgot') && (
+                <div style={{ display: 'grid', gap: 10 }}>
+                  {[
+                    'What was your first pet’s name?',
+                    'What was your childhood nickname?',
+                    'What city or town were you born in?',
+                    'What is your favorite hobby?',
+                    'What was the name of your first school?',
+                  ].map((question, index) => (
+                    <label className="field-label" key={question}>
+                      {question}
+                      <input
+                        className="field-input"
+                        value={form.recoveryAnswers[index] || ''}
+                        onChange={(e) => {
+                          const next = [...form.recoveryAnswers]
+                          next[index] = e.target.value
+                          setForm(prev => ({ ...prev, recoveryAnswers: next }))
+                        }}
+                        placeholder="Your answer"
+                        required={mode === 'signup' || mode === 'forgot'}
+                      />
+                    </label>
+                  ))}
+                </div>
+              )}
+
               <label className="field-label">
                 Email address
                 <input
@@ -172,24 +210,28 @@ export default function AuthPage() {
               </label>
 
               <label className="field-label">
-                Password
+                {mode === 'forgot' ? 'New password' : 'Password'}
                 <input
                   className="field-input"
                   type="password"
                   value={form.password}
                   onChange={field('password')}
-                  placeholder={mode === 'signup' ? 'At least 8 characters' : '••••••••'}
+                  placeholder={mode === 'signup' ? 'At least 8 characters' : mode === 'forgot' ? 'Choose a new password' : '••••••••'}
                   required
-                  minLength={mode === 'signup' ? 8 : undefined}
+                  minLength={mode === 'signup' || mode === 'forgot' ? 8 : undefined}
                   autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
                 />
               </label>
 
               {mode === 'login' && (
                 <div style={{ textAlign: 'right' }}>
-                  <span style={{ fontSize: '0.82rem', color: 'var(--terracotta)', cursor: 'pointer', fontWeight: 600 }}>
+                  <button
+                    type="button"
+                    onClick={() => switchMode('forgot')}
+                    style={{ fontSize: '0.82rem', color: 'var(--terracotta)', cursor: 'pointer', fontWeight: 600, background: 'transparent', border: 'none', padding: 0 }}
+                  >
                     Forgot password?
-                  </span>
+                  </button>
                 </div>
               )}
 
@@ -212,8 +254,8 @@ export default function AuthPage() {
                 style={{ marginTop: 4 }}
               >
                 {submitting
-                  ? (mode === 'login' ? 'Signing in…' : 'Creating account…')
-                  : (mode === 'login' ? 'Sign In' : 'Create Account')
+                  ? (mode === 'login' ? 'Signing in…' : mode === 'forgot' ? 'Updating password…' : 'Creating account…')
+                  : (mode === 'login' ? 'Sign In' : mode === 'forgot' ? 'Reset Password' : 'Create Account')
                 }
               </motion.button>
             </form>
@@ -226,6 +268,13 @@ export default function AuthPage() {
                   <span>New to JLPT Learning?</span>
                   <button type="button" onClick={() => switchMode('signup')}>
                     Create an account →
+                  </button>
+                </>
+              ) : mode === 'forgot' ? (
+                <>
+                  <span>Remembered your password?</span>
+                  <button type="button" onClick={() => switchMode('login')}>
+                    Sign in →
                   </button>
                 </>
               ) : (

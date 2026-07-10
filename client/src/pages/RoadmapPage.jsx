@@ -1,6 +1,7 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence, useInView } from 'framer-motion'
 import { Link } from 'react-router-dom'
+import api from '../lib/api'
 
 // ── Accurate JLPT Data ────────────────────────────────────────────────────────
 
@@ -588,15 +589,60 @@ function LevelCard({ level, index, expanded, onToggle }) {
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
+// LEVELS holds only static, descriptive curriculum content (overview, curriculum
+// breakdown, prerequisites, etc.) — it is never a source of truth for a user's
+// actual status/progress/counts. Those always come from /api/v1/roadmap. This
+// neutral base is what renders before that first real fetch resolves, so no
+// fabricated numbers are ever shown, even momentarily.
+const NEUTRAL_LEVELS = LEVELS.map((l) => ({
+  ...l, status: 'upcoming', progress: 0, current: false, stats: { kanji: 0, vocab: 0, grammar: 0 },
+}))
+
 export default function RoadmapPage() {
   const [expanded, setExpanded] = useState('N3')
+  const [levels, setLevels] = useState(NEUTRAL_LEVELS)
+  const [totalXp, setTotalXp] = useState(0)
+  const [loadingLevels, setLoadingLevels] = useState(true)
+  const [loadError, setLoadError] = useState('')
 
-  const totalXP        = LEVELS.reduce((s, l) => s + l.xp, 0)
-  const completedCount = LEVELS.filter(l => l.status === 'complete').length
-  const currentLevel   = LEVELS.find(l => l.status === 'current')
-  const overallPct     = Math.round(((completedCount * 100 + (currentLevel?.progress ?? 0)) / 500) * 100)
+  // Derived purely from real (or neutral, pre-load) data — never from hardcoded content.
+  const completedCount = levels.filter(l => l.status === 'complete').length
+  const currentLevel   = levels.find(l => l.status === 'current')
+  const overallPct     = Math.round(((completedCount * 100 + (currentLevel?.progress ?? 0)) / (levels.length * 100)) * 100)
+  const totalKanji      = levels.reduce((s, l) => s + l.stats.kanji, 0)
+  const totalVocab      = levels.reduce((s, l) => s + l.stats.vocab, 0)
+  const totalGrammar    = levels.reduce((s, l) => s + l.stats.grammar, 0)
 
   function toggle(code) { setExpanded(p => p === code ? null : code) }
+
+  useEffect(() => {
+    let mounted = true
+    async function fetchRoadmap() {
+      setLoadingLevels(true)
+      try {
+        const { data } = await api.get('/api/v1/roadmap')
+        if (!mounted) return
+        // Merge real status/progress/stats onto the static curriculum content —
+        // any level the API doesn't return (shouldn't happen) falls back to neutral.
+        const merged = LEVELS.map((def) => {
+          const real = data.levels?.find((n) => n.code === def.code)
+          return real
+            ? { ...def, status: real.status, progress: real.progress, current: real.current, stats: real.stats }
+            : { ...def, status: 'upcoming', progress: 0, current: false, stats: { kanji: 0, vocab: 0, grammar: 0 } }
+        })
+        setLevels(merged)
+        setTotalXp(data.totalXp ?? 0)
+        setLoadError('')
+      } catch (err) {
+        console.error('Failed to load roadmap progress:', err)
+        setLoadError('Unable to load your live progress right now.')
+      } finally {
+        if (mounted) setLoadingLevels(false)
+      }
+    }
+    fetchRoadmap()
+    return () => { mounted = false }
+  }, [])
 
   return (
     <div className="page-shell" style={{ position: 'relative', overflow: 'hidden' }}>
@@ -640,7 +686,7 @@ export default function RoadmapPage() {
             { label: 'Levels Complete', val: `${completedCount} / 5`, color: '#059669' },
             { label: 'Current Level',   val: currentLevel?.code ?? '—', color: currentLevel?.color ?? 'var(--terracotta)' },
             { label: 'Journey Progress',val: `${overallPct}%`, color: '#7c3aed' },
-            { label: 'XP Earned',       val: totalXP.toLocaleString(), color: '#b45309' },
+            { label: 'XP Earned',       val: totalXp.toLocaleString(), color: '#b45309' },
           ].map(s => (
             <div key={s.label}>
               <div style={{ fontSize: '1.5rem', fontWeight: 900, color: s.color, lineHeight: 1 }}>{s.val}</div>
@@ -662,7 +708,7 @@ export default function RoadmapPage() {
             />
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 7 }}>
-            {LEVELS.map(l => (
+            {levels.map(l => (
               <div key={l.code} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
                 <span style={{ fontSize: '0.68rem', fontWeight: 800, color: l.status === 'upcoming' ? 'var(--muted-plum)' : l.color }}>{l.code}</span>
                 <span style={{ fontSize: '0.58rem', color: 'var(--muted-plum)' }}>{l.label}</span>
@@ -671,16 +717,27 @@ export default function RoadmapPage() {
           </div>
         </motion.div>
 
-        {/* Aggregate curriculum stats */}
+        {/* Aggregate curriculum stats — summed from real per-level DB counts, not hardcoded */}
         <motion.div style={{ display: 'flex', gap: 10, marginTop: 20, flexWrap: 'wrap' }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.75 }}>
-          <StatChip icon="字" label="Total Kanji" value="2,136" color="#7c3aed" />
-          <StatChip icon="語" label="Total Vocab" value="8,334+" color="#0284c7" />
-          <StatChip icon="文" label="Grammar Pts" value="657+" color="#b45309" />
+          <StatChip icon="字" label="Total Kanji" value={totalKanji.toLocaleString()} color="#7c3aed" />
+          <StatChip icon="語" label="Total Vocab" value={totalVocab.toLocaleString()} color="#0284c7" />
+          <StatChip icon="文" label="Grammar Pts" value={totalGrammar.toLocaleString()} color="#b45309" />
           <StatChip icon="⏱️" label="Study Hours" value="900–2,000+" color="#059669" />
         </motion.div>
 
         <span style={{ position: 'absolute', right: 28, top: '50%', transform: 'translateY(-50%)', fontSize: '8rem', fontWeight: 900, color: 'rgba(201,122,74,0.045)', pointerEvents: 'none', userSelect: 'none' }}>道</span>
       </motion.div>
+
+      {loadingLevels && (
+        <div className="notice" style={{ background: 'rgba(0,0,0,0.04)', color: 'var(--muted-plum)', zIndex: 1, position: 'relative' }}>
+          Loading your live progress…
+        </div>
+      )}
+      {loadError && (
+        <div className="notice" style={{ background: 'rgba(192,80,60,0.08)', color: '#c0503c', borderLeft: '3px solid #c0503c', zIndex: 1, position: 'relative' }}>
+          {loadError}
+        </div>
+      )}
 
       {/* ── How to use this roadmap ────────────────────────────────────────── */}
       <motion.div
@@ -706,7 +763,7 @@ export default function RoadmapPage() {
         />
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-          {LEVELS.map((level, i) => (
+          {levels.map((level, i) => (
             <LevelCard key={level.code} level={level} index={i} expanded={expanded === level.code} onToggle={() => toggle(level.code)} />
           ))}
         </div>

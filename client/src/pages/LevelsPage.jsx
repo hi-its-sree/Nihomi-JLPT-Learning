@@ -7,6 +7,8 @@ export default function LevelsPage() {
   const [levelsState, setLevelsState] = useState([])
   const [loading, setLoading] = useState(true)
 
+  const getCount = (level, key) => level?.stats?.[key] ?? level?.[key] ?? 0
+
   useEffect(() => {
     let active = true
     const load = async () => {
@@ -117,9 +119,9 @@ export default function LevelsPage() {
                     {/* Counts */}
                     <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 12 }}>
                       {[
-                        { label: 'Kanji',     val: lvl.kanji.toLocaleString() },
-                        { label: 'Vocab',     val: lvl.vocab.toLocaleString() },
-                        { label: 'Grammar',   val: lvl.grammar },
+                        { label: 'Kanji',   val: getCount(lvl, 'kanji').toLocaleString() },
+                        { label: 'Vocab',   val: getCount(lvl, 'vocab').toLocaleString() },
+                        { label: 'Grammar', val: getCount(lvl, 'grammar') },
                       ].map(m => (
                         <div key={m.label} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                           <span style={{ fontSize: '1rem', fontWeight: 900, color: 'var(--dark-ink)' }}>{m.val}</span>

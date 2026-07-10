@@ -69,10 +69,15 @@ export function AuthProvider({ children }) {
     return data
   }
 
-  const signup = async (email, password, username) => {
-    const { data } = await api.post('/auth/register', { email, password, username })
+  const signup = async (email, password, username, recoveryAnswers = []) => {
+    const { data } = await api.post('/auth/register', { email, password, username, recoveryAnswers })
     setUser(data.user)
     setToken(data.token)
+    return data
+  }
+
+  const forgotPassword = async (email, answers, newPassword) => {
+    const { data } = await api.post('/auth/forgot-password', { email, answers, newPassword })
     return data
   }
 
@@ -82,7 +87,7 @@ export function AuthProvider({ children }) {
   }
 
   const value = useMemo(
-    () => ({ user, token, loading, login, signup, logout, isAuthenticated: Boolean(user && token) }),
+    () => ({ user, token, loading, login, signup, forgotPassword, logout, isAuthenticated: Boolean(user && token) }),
     [user, token, loading],
   )
 

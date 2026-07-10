@@ -91,6 +91,46 @@ export default function DashboardPage() {
   const target = dashboardData?.target ?? null
   const isNewUser = dashboardData?.isNewUser
 
+  let todayPlanContent = (
+    <div style={{ color: 'var(--muted-plum)' }}>
+      {target?.level
+        ? `Your ${target.level} plan will appear here as soon as you start learning.`
+        : 'Your personalized plan will appear here as soon as you start learning.'}
+    </div>
+  )
+
+  if (loading) {
+    todayPlanContent = <div style={{ color: 'var(--muted-plum)' }}>Loading your live study plan…</div>
+  } else if (todayPlan.length > 0) {
+    todayPlanContent = todayPlan.map((item) => {
+      if (item.cta) {
+        return (
+          <div key={item.id} className="plan-item" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span className="plan-item-icon">{item.icon}</span>
+              <div className="plan-item-text">
+                <div className="plan-item-name">{item.title}</div>
+                <div className="plan-item-count">{item.duration} • +{item.xp} XP</div>
+              </div>
+            </div>
+            <Link to={item.cta} className="primary-btn">Get started</Link>
+          </div>
+        )
+      }
+
+      return (
+        <div key={item.id} className="plan-item">
+          <span className="plan-item-icon">{item.icon}</span>
+          <div className="plan-item-text">
+            <div className="plan-item-name">{item.title}</div>
+            <div className="plan-item-count">{item.duration} • +{item.xp} XP</div>
+          </div>
+          <span className={`plan-item-badge ${item.done ? 'done' : ''}`}>{item.done ? 'Done' : 'Today'}</span>
+        </div>
+      )
+    })
+  }
+
   const cardVariants = {
     hidden:  { opacity: 0, y: 20 },
     visible: (i) => ({ opacity: 1, y: 0, transition: { delay: i * 0.07, duration: 0.45 } }),
@@ -181,38 +221,7 @@ export default function DashboardPage() {
             </div>
           )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {loading ? (
-              <div style={{ color: 'var(--muted-plum)' }}>Loading your live study plan…</div>
-            ) : todayPlan.length > 0 ? (
-              todayPlan.map(item => (
-                  item.cta ? (
-                    <div key={item.id} className="plan-item" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <span className="plan-item-icon">{item.icon}</span>
-                        <div className="plan-item-text">
-                          <div className="plan-item-name">{item.title}</div>
-                          <div className="plan-item-count">{item.duration} • +{item.xp} XP</div>
-                        </div>
-                      </div>
-                      <Link to={item.cta} className="primary-btn">Get started</Link>
-                    </div>
-                  ) : (
-                    <div key={item.id} className="plan-item">
-                      <span className="plan-item-icon">{item.icon}</span>
-                      <div className="plan-item-text">
-                        <div className="plan-item-name">{item.title}</div>
-                        <div className="plan-item-count">{item.duration} • +{item.xp} XP</div>
-                      </div>
-                      <span className={`plan-item-badge ${item.done ? 'done' : ''}`}>{item.done ? 'Done' : 'Today'}</span>
-                    </div>
-              ))
-            )) : (
-              <div style={{ color: 'var(--muted-plum)' }}>
-                {target?.level
-                  ? `Your ${target.level} plan will appear here as soon as you start learning.`
-                  : 'Your personalized plan will appear here as soon as you start learning.'}
-              </div>
-            )}
+            {todayPlanContent}
           </div>
         </motion.div>
 
