@@ -1,0 +1,3 @@
+[submodule "OpenJLPT"]
+	path = OpenJLPT
+	url = https://github.com/evanclan/OpenJLPT.git

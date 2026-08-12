@@ -45,6 +45,7 @@ services:
       - backend
     environment:
       VITE_API_URL: ${VITE_API_URL:-}
+      BACKEND_ORIGIN: http://backend:4000
     ports:
       - "${FRONTEND_HOST_PORT:-5174}:5173"
     restart: unless-stopped

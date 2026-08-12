@@ -25,6 +25,8 @@ const PracticePage     = lazy(() => import('./pages/PracticePage'))
 const TestsPage        = lazy(() => import('./pages/TestsPage'))
 const LessonPage       = lazy(() => import('./pages/LessonPage'))
 const FlashcardsPage   = lazy(() => import('./pages/FlashcardsPage'))
+const StrokePracticePage = lazy(() => import('./pages/StrokePracticePage'))
+const GrammarDrillPage = lazy(() => import('./pages/GrammarDrillPage'))
 const RoadmapPage      = lazy(() => import('./pages/RoadmapPage'))
 const ProgressPage     = lazy(() => import('./pages/ProgressPage'))
 const ProfilePage      = lazy(() => import('./pages/ProfilePage'))
@@ -293,6 +295,8 @@ function AppRoutes() {
         <Route path="/tests/:levelOrId" element={<TestsPage />} />
         <Route path="/lessons" element={<LessonPage />} />
         <Route path="/flashcards" element={<FlashcardsPage />} />
+        <Route path="/stroke-practice" element={<StrokePracticePage />} />
+        <Route path="/grammar-drill" element={<GrammarDrillPage />} />
         <Route path="/roadmap" element={<RoadmapPage />} />
         <Route path="/progress" element={<ProgressPage />} />
         <Route path="/profile" element={<ProfilePage />} />

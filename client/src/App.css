@@ -952,6 +952,15 @@ h1, h2, h3 { margin: 0; color: var(--dark-ink); font-family: var(--font); }
 .stroke-canvas svg { width: 100%; height: 100%; }
 .stroke-controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
 
+/* Tracing surface — bigger than the playback canvas because it takes input,
+   and it must not scroll the page while a stroke is being drawn on touch. */
+.trace-canvas {
+  width: min(300px, 78vw);
+  height: min(300px, 78vw);
+  touch-action: none;
+  user-select: none;
+}
+
 /* ── Flashcard ───────────────────────────────────────────── */
 .flashcard-scene {
   perspective: 800px;

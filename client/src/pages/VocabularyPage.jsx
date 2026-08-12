@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Link, useParams } from 'react-router-dom'
 import api from '../lib/api'
+import DeckMenu from '../components/DeckMenu'
+import FloatingMenu from '../components/FloatingMenu'
 
 const STAGES = {
   new:    { label: 'New',    color: '#0284c7', bg: 'rgba(56,189,248,0.12)'  },
@@ -24,6 +26,9 @@ export default function VocabularyPage() {
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [flashcardIds, setFlashcardIds] = useState(() => new Set())
+  const [pendingId, setPendingId] = useState(null)
+  const [openMenu, setOpenMenu] = useState(null) // { id, top, right } | null
 
   const effectiveLevel = levelParam ?? activeLevel
   const filtered = items
@@ -58,6 +63,45 @@ export default function VocabularyPage() {
     }
   }, [effectiveLevel, activeStage, search])
 
+  useEffect(() => {
+    let mounted = true
+    api.get('/api/v1/flashcards/vocab-ids')
+      .then(({ data }) => {
+        if (!mounted) return
+        setFlashcardIds(new Set(data.vocabularyIds || []))
+      })
+      .catch(() => {})
+    return () => { mounted = false }
+  }, [])
+
+  async function toggleFlashcard(vocabId) {
+    if (!vocabId || pendingId) return
+    const isAdded = flashcardIds.has(vocabId)
+
+    // Optimistic — revert below if the request fails.
+    setFlashcardIds(prev => {
+      const next = new Set(prev)
+      if (isAdded) next.delete(vocabId)
+      else next.add(vocabId)
+      return next
+    })
+    setPendingId(vocabId)
+
+    try {
+      if (isAdded) await api.delete(`/api/v1/flashcards/vocab/${vocabId}`)
+      else await api.post(`/api/v1/flashcards/vocab/${vocabId}`)
+    } catch {
+      setFlashcardIds(prev => {
+        const next = new Set(prev)
+        if (isAdded) next.add(vocabId)
+        else next.delete(vocabId)
+        return next
+      })
+    } finally {
+      setPendingId(null)
+    }
+  }
+
   return (
     <div className="page-shell">
 
@@ -89,7 +133,12 @@ export default function VocabularyPage() {
             onChange={e => setSearch(e.target.value)}
             style={{ flex: '1 1 240px', maxWidth: 360 }}
           />
-          <Link to="/flashcards" className="primary-btn">SRS Review →</Link>
+          <Link
+            to={`/flashcards?type=vocab&level=${effectiveLevel === 'All' ? 'N5' : effectiveLevel}`}
+            className="primary-btn"
+          >
+            SRS Review →
+          </Link>
         </div>
       </motion.div>
 
@@ -146,6 +195,8 @@ export default function VocabularyPage() {
           {filtered.map((v, i) => {
             const stage = STAGES[v.stage] ?? STAGES.new
             const posColor = POS_COLORS[v.pos] ?? POS_COLORS.word
+            const isAdded = flashcardIds.has(v.id)
+            const isMenuOpen = openMenu?.id === v.id
             return (
               <motion.div
                 key={v.id ?? v.word}
@@ -171,12 +222,48 @@ export default function VocabularyPage() {
                   <span style={{ fontSize: '0.82rem', color: 'var(--muted-plum)' }}>{v.example}</span>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12, gap: 8 }}>
                   <span style={{ fontSize: '0.72rem', fontWeight: 700, padding: '3px 10px', borderRadius: 999, background: stage.bg, color: stage.color }}>
                     {stage.label}
                   </span>
-                  <button className="ghost-btn btn-sm" style={{ fontSize: '0.75rem' }}>Add to review</button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <button
+                      type="button"
+                      className={isAdded ? 'primary-btn btn-sm' : 'ghost-btn btn-sm'}
+                      style={{ fontSize: '0.75rem' }}
+                      disabled={!v.id || pendingId === v.id}
+                      onClick={() => toggleFlashcard(v.id)}
+                    >
+                      {isAdded ? 'In review ✓' : 'Add to review'}
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Collection actions"
+                      disabled={!v.id}
+                      onClick={(e) => {
+                        if (isMenuOpen) {
+                          setOpenMenu(null)
+                          return
+                        }
+                        const rect = e.currentTarget.getBoundingClientRect()
+                        setOpenMenu({ id: v.id, top: rect.bottom + 6, right: window.innerWidth - rect.right })
+                      }}
+                      style={{
+                        width: 24, height: 24, borderRadius: '50%', border: 'none',
+                        background: 'rgba(201,122,74,0.12)', color: 'var(--muted-plum)',
+                        cursor: 'pointer', fontWeight: 900, lineHeight: 1, fontSize: '0.9rem',
+                      }}
+                    >
+                      ⋮
+                    </button>
+                  </div>
                 </div>
+
+                {isMenuOpen && (
+                  <FloatingMenu position={{ top: openMenu.top, right: openMenu.right }} onClose={() => setOpenMenu(null)}>
+                    <DeckMenu kind="vocab" vocabId={v.id} />
+                  </FloatingMenu>
+                )}
               </motion.div>
             )
           })}

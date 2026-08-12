@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import api from '../lib/api'
 import { useDecks } from '../hooks/useDecks'
 import TextPromptModal from '../components/TextPromptModal'
@@ -17,11 +17,19 @@ const LEVELS = ['N5', 'N4', 'N3', 'N2', 'N1']
 
 const DIRECTION_KEY = 'jlpt-flashcard-direction'
 const DIRECTIONS = [
-  { key: 'kanji-first',   label: 'Kanji first', desc: 'See the kanji, tap to reveal reading & meaning' },
-  { key: 'meaning-first', label: 'Meaning first', desc: 'See the reading & meaning, tap to reveal the kanji' },
+  { key: 'kanji-first',   label: 'Card first', desc: 'See the kanji or word, tap to reveal reading & meaning' },
+  { key: 'meaning-first', label: 'Meaning first', desc: 'See the reading & meaning, tap to reveal the kanji or word' },
+]
+
+// Which content bank the level view studies. 'mine' and named collections are
+// mixed by nature, so this only applies to the level view.
+const CONTENT_TYPES = [
+  { key: 'kanji', label: 'Kanji', noun: 'Kanji' },
+  { key: 'vocab', label: 'Vocabulary', noun: 'Vocabulary' },
 ]
 
 export default function FlashcardsPage() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [deck,       setDeck]       = useState([])
   const [meta,        setMeta]       = useState({ due: 0, newCount: 0, level: '', deckName: '' })
   const [loading,     setLoading]    = useState(true)
@@ -31,7 +39,13 @@ export default function FlashcardsPage() {
   const [history,     setHistory]    = useState([])
   const [done,        setDone]       = useState(false)
   const [submitting,  setSubmitting] = useState(false)
-  const [activeLevel, setActiveLevel] = useState('N5')
+  const [activeLevel, setActiveLevel] = useState(() => {
+    const fromUrl = (searchParams.get('level') || '').toUpperCase()
+    return LEVELS.includes(fromUrl) ? fromUrl : 'N5'
+  })
+  const [contentType, setContentType] = useState(() => (
+    searchParams.get('type') === 'vocab' ? 'vocab' : 'kanji'
+  ))
   const [view,         setView]       = useState('level') // 'level' | 'collection' — the flashcards themselves come first
   const [collectionId, setCollectionId] = useState(null) // 'mine' | a deck id
   const [createModalOpen, setCreateModalOpen] = useState(false)
@@ -85,7 +99,7 @@ export default function FlashcardsPage() {
       } else if (view === 'collection') {
         ({ data } = await api.get(`/api/v1/decks/${collectionId}/cards`))
       } else {
-        ({ data } = await api.get('/api/v1/flashcards', { params: { source: 'level', level: activeLevel } }))
+        ({ data } = await api.get('/api/v1/flashcards', { params: { source: 'level', level: activeLevel, type: contentType } }))
       }
       setDeck(data.deck ?? [])
       setMeta({ due: data.due ?? 0, newCount: data.newCount ?? 0, level: data.level ?? '', deckName: data.deckName ?? '' })
@@ -99,7 +113,14 @@ export default function FlashcardsPage() {
 
   useEffect(() => {
     loadDeck()
-  }, [activeLevel, view, collectionId])
+  }, [activeLevel, contentType, view, collectionId])
+
+  // Keep the URL in step with the level view so a session stays shareable and
+  // survives a reload — Practice links in with ?type=vocab&level=N4.
+  useEffect(() => {
+    if (view !== 'level') return
+    setSearchParams({ type: contentType, level: activeLevel }, { replace: true })
+  }, [view, contentType, activeLevel, setSearchParams])
 
   async function handleCreateDeck(name) {
     const created = await createDeck(name)
@@ -116,17 +137,21 @@ export default function FlashcardsPage() {
   }
 
   const card = deck[index]
+  const activeContentType = CONTENT_TYPES.find(t => t.key === contentType) ?? CONTENT_TYPES[0]
 
   function renderFilterBar() {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div className="filter-bar">
-          <button
-            className={`filter-pill ${view === 'level' ? 'active' : ''}`}
-            onClick={switchToFlashcards}
-          >
-            Flashcards
-          </button>
+          {CONTENT_TYPES.map(t => (
+            <button
+              key={t.key}
+              className={`filter-pill ${view === 'level' && contentType === t.key ? 'active' : ''}`}
+              onClick={() => { setContentType(t.key); switchToFlashcards() }}
+            >
+              {t.label}
+            </button>
+          ))}
           <select
             className="field-input"
             value={activeLevel}
@@ -134,7 +159,7 @@ export default function FlashcardsPage() {
             style={{ padding: '7px 14px', fontSize: '0.82rem', fontWeight: 700, borderRadius: 999, width: 'auto' }}
           >
             {LEVELS.map(l => (
-              <option key={l} value={l}>{l} Kanji</option>
+              <option key={l} value={l}>{l} {activeContentType.noun}</option>
             ))}
           </select>
           <button
@@ -188,7 +213,7 @@ export default function FlashcardsPage() {
         <TextPromptModal
           open={createModalOpen}
           title={decks.length === 0 ? 'Name your first collection' : 'Name your new collection'}
-          subtitle={decks.length === 0 ? 'Group kanji your own way — you can add cards to it right after.' : undefined}
+          subtitle={decks.length === 0 ? 'Group kanji and words your own way — you can add cards to it right after.' : undefined}
           submitLabel="Create collection"
           onSubmit={handleCreateDeck}
           onClose={() => setCreateModalOpen(false)}
@@ -248,13 +273,16 @@ export default function FlashcardsPage() {
   if (!loading && deck.length === 0) {
     let emptyCopy
     if (view === 'level') {
-      emptyCopy = { title: 'No kanji found for this level', body: 'Try a different level from the dropdown above.' }
+      emptyCopy = {
+        title: `No ${activeContentType.label.toLowerCase()} found for this level`,
+        body: 'Try a different level from the dropdown above.',
+      }
     } else if (collectionId === 'mine') {
-      emptyCopy = { title: 'No flashcards added yet', body: 'Cards you add from the Kanji pages show up here. Browse the Kanji library and use the ⋮ menu or the "Add to Flashcards" button to build your own set.' }
+      emptyCopy = { title: 'No flashcards added yet', body: 'Cards you add from the Kanji and Vocabulary pages show up here. Browse either library and use the ⋮ menu or the "Add to review" button to build your own set.' }
     } else if (collectionId) {
-      emptyCopy = { title: 'This collection is empty', body: 'Add kanji to this collection from the Kanji pages using the "Collections" menu.' }
+      emptyCopy = { title: 'This collection is empty', body: 'Add kanji or words to this collection from the Kanji and Vocabulary pages using the ⋮ menu.' }
     } else {
-      emptyCopy = { title: 'No collections yet', body: 'Create your first collection above, then add kanji to it from the Kanji pages using the "Collections" menu.' }
+      emptyCopy = { title: 'No collections yet', body: 'Create your first collection above, then add kanji or words to it from the Kanji and Vocabulary pages using the ⋮ menu.' }
     }
 
     return (
@@ -269,7 +297,9 @@ export default function FlashcardsPage() {
           </p>
           <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 20, flexWrap: 'wrap' }}>
             <button className="primary-btn" onClick={loadDeck}>Check again</button>
-            <Link to="/kanji" className="secondary-btn">Browse Kanji →</Link>
+            {contentType === 'vocab'
+              ? <Link to="/vocabulary" className="secondary-btn">Browse Vocabulary →</Link>
+              : <Link to="/kanji" className="secondary-btn">Browse Kanji →</Link>}
           </div>
         </motion.div>
       </div>
@@ -494,7 +524,7 @@ export default function FlashcardsPage() {
         <div>
           <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--muted-plum)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>Deck</span>
           <div style={{ fontSize: '0.92rem', fontWeight: 700, color: 'var(--dark-ink)', marginTop: 2 }}>
-            {view === 'level' && `${meta.level} Kanji`}
+            {view === 'level' && `${meta.level} ${activeContentType.noun}`}
             {view === 'collection' && collectionId === 'mine' && 'My Flashcards'}
             {view === 'collection' && collectionId && collectionId !== 'mine' && (meta.deckName || 'Collection')}
           </div>

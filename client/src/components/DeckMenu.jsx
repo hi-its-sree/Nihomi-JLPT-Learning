@@ -3,13 +3,21 @@ import api from '../lib/api'
 import { useDecks } from '../hooks/useDecks'
 import TextPromptModal from './TextPromptModal'
 
-// Popover content for adding/removing a single kanji from the user's custom,
-// renameable flashcard collections. Used from both the Kanji list and detail pages.
+// Popover content for adding/removing a single card from the user's custom,
+// renameable flashcard collections. Used from the Kanji list/detail pages and
+// the Vocabulary list — `kind` picks which content bank the id belongs to and
+// therefore which /api/v1/decks/... routes to call.
 //
-// - No collections yet -> the only option is to create one; the kanji is added
+// - No collections yet -> the only option is to create one; the card is added
 //   to it as soon as it's created.
-// - Has collections -> ask which one(s) the kanji should go into (checkbox list).
-export default function DeckMenu({ kanjiId, onMembershipChange }) {
+// - Has collections -> ask which one(s) the card should go into (checkbox list).
+export default function DeckMenu({ kanjiId, vocabId, kind, onMembershipChange }) {
+  // Callers pass either kanjiId or vocabId; `kind` is derived so existing
+  // kanji call sites keep working untouched.
+  const contentKind = kind ?? (vocabId ? 'vocab' : 'kanji')
+  const contentId = contentKind === 'vocab' ? vocabId : kanjiId
+  const noun = contentKind === 'vocab' ? 'word' : 'kanji'
+
   const { decks, loading: decksLoading, createDeck } = useDecks()
   const [memberDeckIds, setMemberDeckIds] = useState(new Set())
   const [busyDeckId, setBusyDeckId] = useState(null)
@@ -18,7 +26,7 @@ export default function DeckMenu({ kanjiId, onMembershipChange }) {
 
   useEffect(() => {
     let mounted = true
-    api.get(`/api/v1/decks/kanji/${kanjiId}`)
+    api.get(`/api/v1/decks/${contentKind}/${contentId}`)
       .then(({ data }) => {
         if (!mounted) return
         const ids = new Set(data.deckIds || [])
@@ -28,7 +36,7 @@ export default function DeckMenu({ kanjiId, onMembershipChange }) {
       .catch(() => {})
     return () => { mounted = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kanjiId])
+  }, [contentKind, contentId])
 
   async function toggleDeck(deckId) {
     if (busyDeckId) return
@@ -36,7 +44,7 @@ export default function DeckMenu({ kanjiId, onMembershipChange }) {
     setError('')
     try {
       if (memberDeckIds.has(deckId)) {
-        await api.delete(`/api/v1/decks/${deckId}/kanji/${kanjiId}`)
+        await api.delete(`/api/v1/decks/${deckId}/${contentKind}/${contentId}`)
         setMemberDeckIds(prev => {
           const next = new Set(prev)
           next.delete(deckId)
@@ -44,7 +52,7 @@ export default function DeckMenu({ kanjiId, onMembershipChange }) {
           return next
         })
       } else {
-        await api.post(`/api/v1/decks/${deckId}/kanji/${kanjiId}`)
+        await api.post(`/api/v1/decks/${deckId}/${contentKind}/${contentId}`)
         setMemberDeckIds(prev => {
           const next = new Set(prev).add(deckId)
           onMembershipChange?.(true)
@@ -60,7 +68,7 @@ export default function DeckMenu({ kanjiId, onMembershipChange }) {
 
   async function handleCreateAndAdd(name) {
     const deck = await createDeck(name)
-    await api.post(`/api/v1/decks/${deck.id}/kanji/${kanjiId}`)
+    await api.post(`/api/v1/decks/${deck.id}/${contentKind}/${contentId}`)
     setMemberDeckIds(prev => new Set(prev).add(deck.id))
     onMembershipChange?.(true)
   }
@@ -80,7 +88,7 @@ export default function DeckMenu({ kanjiId, onMembershipChange }) {
           You don't have a collection yet
         </div>
         <p style={{ fontSize: '0.76rem', color: 'var(--muted-plum)', marginBottom: 10, lineHeight: 1.5 }}>
-          Create one to start grouping kanji your own way.
+          Create one to start grouping {noun === 'word' ? 'words' : 'kanji'} your own way.
         </p>
         <button
           type="button"
@@ -95,7 +103,7 @@ export default function DeckMenu({ kanjiId, onMembershipChange }) {
         <TextPromptModal
           open={createModalOpen}
           title="Name your first collection"
-          subtitle="This kanji will be added to it right away."
+          subtitle={`This ${noun} will be added to it right away.`}
           submitLabel="Create collection"
           onSubmit={handleCreateAndAdd}
           onClose={() => setCreateModalOpen(false)}
@@ -146,7 +154,7 @@ export default function DeckMenu({ kanjiId, onMembershipChange }) {
       <TextPromptModal
         open={createModalOpen}
         title="Name your new collection"
-        subtitle="This kanji will be added to it right away."
+        subtitle={`This ${noun} will be added to it right away.`}
         submitLabel="Create collection"
         onSubmit={handleCreateAndAdd}
         onClose={() => setCreateModalOpen(false)}

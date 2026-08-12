@@ -180,7 +180,8 @@ export default function KanjiPage() {
             onChange={e => setSearch(e.target.value)}
             style={{ flex: '1 1 240px', maxWidth: 360 }}
           />
-          <Link to="/flashcards" className="secondary-btn">SRS Review →</Link>
+          <Link to={`/flashcards?type=kanji&level=${effectiveLevel === 'All' ? 'N5' : effectiveLevel}`} className="secondary-btn">SRS Review →</Link>
+          <Link to={`/stroke-practice?level=${effectiveLevel === 'All' ? 'N5' : effectiveLevel}&mode=trace`} className="primary-btn">✍ Stroke Practice →</Link>
         </div>
       </motion.div>
 

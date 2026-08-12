@@ -6,6 +6,7 @@ import authRoutes from './routes/auth'
 import kanjiRoutes from './routes/kanji'
 import journeyRoutes from './routes/journey'
 import { buildMockTestsPayload } from './utils/mockTests'
+import { buildGrammarDrill } from './utils/grammarDrills'
 
 const router = new Hono()
 
@@ -767,6 +768,28 @@ router.get('/api/v1/flashcards', requireAuth, async (c) => {
   }
 
   if (source === 'level') {
+    // ?type=vocab browses the vocabulary bank at this level instead of the kanji
+    // bank — same "study a whole level directly" behaviour, different content.
+    const contentType = c.req.query('type') === 'vocab' ? 'vocab' : 'kanji'
+
+    if (contentType === 'vocab') {
+      const [levelVocab, reviews] = await Promise.all([
+        db.vocabulary.findMany({ where: { level }, orderBy: { word: 'asc' } }),
+        db.flashcardReview.findMany({ where: { userId, vocabularyId: { not: null } }, select: { vocabularyId: true, reviewCount: true, addedManually: true } }),
+      ])
+
+      const reviewByVocabId = new Map(reviews.map((r) => [r.vocabularyId as string, r]))
+      const vocabCards = levelVocab.map((v) => {
+        const card = vocabToCard(v)
+        const review = reviewByVocabId.get(v.id)
+        return review
+          ? { ...card, isNew: review.reviewCount === 0, reviewCount: review.reviewCount, addedManually: review.addedManually }
+          : card
+      })
+
+      return c.json({ deck: vocabCards, due: vocabCards.length, newCount: vocabCards.filter((cd) => cd.isNew).length, level, source: 'level', type: 'vocab' })
+    }
+
     const [levelKanji, reviews] = await Promise.all([
       db.kanjiEntry.findMany({ where: { level }, orderBy: { character: 'asc' } }),
       db.flashcardReview.findMany({ where: { userId, kanjiId: { not: null } }, select: { kanjiId: true, reviewCount: true, addedManually: true } }),
@@ -781,7 +804,7 @@ router.get('/api/v1/flashcards', requireAuth, async (c) => {
         : card
     })
 
-    return c.json({ deck: levelCards, due: levelCards.length, newCount: levelCards.filter((cd) => cd.isNew).length, level, source: 'level' })
+    return c.json({ deck: levelCards, due: levelCards.length, newCount: levelCards.filter((cd) => cd.isNew).length, level, source: 'level', type: 'kanji' })
   }
 
   const [dueReviews, allUserReviews] = await Promise.all([
@@ -868,6 +891,52 @@ router.get('/api/v1/flashcards/kanji-ids', requireAuth, async (c) => {
     select: { kanjiId: true },
   })
   return c.json({ kanjiIds: rows.map((r) => r.kanjiId) })
+})
+
+// POST /api/v1/flashcards/vocab/:vocabularyId — vocabulary counterpart of the
+// kanji add above: puts a word straight into the user's deck from the
+// Vocabulary pages, due immediately and visible under "My Flashcards".
+router.post('/api/v1/flashcards/vocab/:vocabularyId', requireAuth, async (c) => {
+  const userId = c.get('userId') as string
+  const vocabularyId = c.req.param('vocabularyId') ?? ''
+
+  const vocabulary = await db.vocabulary.findUnique({ where: { id: vocabularyId } })
+  if (!vocabulary) return c.json({ error: 'Vocabulary entry not found' }, 404)
+
+  const existing = await db.flashcardReview.findUnique({
+    where: { userId_vocabularyId: { userId, vocabularyId } },
+  })
+  if (existing) {
+    if (!existing.addedManually) {
+      await db.flashcardReview.update({ where: { id: existing.id }, data: { addedManually: true } })
+    }
+    return c.json({ added: true, alreadyExisted: true })
+  }
+
+  await db.flashcardReview.create({
+    data: { userId, vocabularyId, cardType: 'vocabulary', addedManually: true },
+  })
+
+  return c.json({ added: true, alreadyExisted: false }, 201)
+})
+
+// DELETE /api/v1/flashcards/vocab/:vocabularyId — remove a word from the user's deck.
+router.delete('/api/v1/flashcards/vocab/:vocabularyId', requireAuth, async (c) => {
+  const userId = c.get('userId') as string
+  const vocabularyId = c.req.param('vocabularyId') ?? ''
+  await db.flashcardReview.deleteMany({ where: { userId, vocabularyId } })
+  return c.json({ removed: true })
+})
+
+// GET /api/v1/flashcards/vocab-ids — ids of vocabulary already in the user's deck,
+// so the Vocabulary pages can render "already added" state without loading the full deck.
+router.get('/api/v1/flashcards/vocab-ids', requireAuth, async (c) => {
+  const userId = c.get('userId') as string
+  const rows = await db.flashcardReview.findMany({
+    where: { userId, vocabularyId: { not: null } },
+    select: { vocabularyId: true },
+  })
+  return c.json({ vocabularyIds: rows.map((r) => r.vocabularyId) })
 })
 
 // ── Decks — user-created, renameable flashcard collections ───────────────────
@@ -1031,6 +1100,60 @@ router.delete('/api/v1/decks/:deckId/kanji/:kanjiId', requireAuth, async (c) => 
   return c.json({ removed: true })
 })
 
+// GET /api/v1/decks/vocab/:vocabularyId — which of the user's decks contain this word.
+router.get('/api/v1/decks/vocab/:vocabularyId', requireAuth, async (c) => {
+  const userId = c.get('userId') as string
+  const vocabularyId = c.req.param('vocabularyId') ?? ''
+  const items = await db.deckItem.findMany({
+    where: { vocabularyId, deck: { userId } },
+    select: { deckId: true },
+  })
+  return c.json({ deckIds: items.map((i) => i.deckId) })
+})
+
+// POST /api/v1/decks/:deckId/vocab/:vocabularyId — vocabulary counterpart of the
+// kanji deck-add above, including the schedulable FlashcardReview row.
+router.post('/api/v1/decks/:deckId/vocab/:vocabularyId', requireAuth, async (c) => {
+  const userId = c.get('userId') as string
+  const deckId = c.req.param('deckId') ?? ''
+  const vocabularyId = c.req.param('vocabularyId') ?? ''
+
+  const [deck, vocabulary] = await Promise.all([
+    db.deck.findFirst({ where: { id: deckId, userId } }),
+    db.vocabulary.findUnique({ where: { id: vocabularyId } }),
+  ])
+  if (!deck) return c.json({ error: 'Deck not found' }, 404)
+  if (!vocabulary) return c.json({ error: 'Vocabulary entry not found' }, 404)
+
+  await Promise.all([
+    db.deckItem.upsert({
+      where: { deckId_vocabularyId: { deckId, vocabularyId } },
+      create: { deckId, vocabularyId },
+      update: {},
+    }),
+    db.flashcardReview.upsert({
+      where: { userId_vocabularyId: { userId, vocabularyId } },
+      create: { userId, vocabularyId, cardType: 'vocabulary', addedManually: true },
+      update: { addedManually: true },
+    }),
+  ])
+
+  return c.json({ added: true }, 201)
+})
+
+// DELETE /api/v1/decks/:deckId/vocab/:vocabularyId — remove a word from this deck only.
+router.delete('/api/v1/decks/:deckId/vocab/:vocabularyId', requireAuth, async (c) => {
+  const userId = c.get('userId') as string
+  const deckId = c.req.param('deckId') ?? ''
+  const vocabularyId = c.req.param('vocabularyId') ?? ''
+
+  const deck = await db.deck.findFirst({ where: { id: deckId, userId } })
+  if (!deck) return c.json({ error: 'Deck not found' }, 404)
+
+  await db.deckItem.deleteMany({ where: { deckId, vocabularyId } })
+  return c.json({ removed: true })
+})
+
 // POST /api/v1/flashcards/:id/review — persists a real SM-2-style spaced-repetition
 // update to FlashcardReview, keyed by the card id (`vocab:<id>` or `kanji:<id>`).
 router.post('/api/v1/flashcards/:id/review', requireAuth, async (c) => {
@@ -1153,16 +1276,54 @@ router.get('/api/v1/practice', requireAuth, async (c) => {
 
   return c.json({
     modes: [
-      { id: 'srs', title: 'SRS Flashcard Review', icon: '🃏', desc: 'Review due cards using spaced repetition.', tags: ['Vocabulary', 'Kanji'], color: '#e8a87c', dueCount },
-      { id: 'stroke', title: 'Kanji Stroke Practice', icon: '✍', desc: `Practice ${kanjiCount} kanji entries from the database.`, tags: ['Kanji', 'Writing'], color: '#b07d62', dueCount: Math.min(kanjiCount, 12) },
-      { id: 'grammar', title: 'Grammar Drills', icon: '文', desc: `Review ${grammarCount} grammar patterns stored in the database.`, tags: ['Grammar'], color: '#a0816a', dueCount: Math.min(grammarCount, 8) },
-      { id: 'vocab', title: 'Vocabulary Quiz', icon: '語', desc: `Work through ${vocabCount} vocabulary entries from the database.`, tags: ['Vocabulary'], color: '#c97a4a', dueCount: Math.min(vocabCount, 16) },
+      { id: 'srs', title: 'SRS Flashcard Review', icon: '🃏', desc: 'Review due cards using spaced repetition.', tags: ['Vocabulary', 'Kanji'], color: '#e8a87c', dueCount, link: '/flashcards' },
+      { id: 'stroke', title: 'Kanji Stroke Practice', icon: '✍', desc: `Trace stroke order for ${kanjiCount} kanji entries from the database.`, tags: ['Kanji', 'Writing'], color: '#b07d62', dueCount: Math.min(kanjiCount, 12), link: `/stroke-practice?level=${user?.studyLevel ?? 'N5'}&mode=trace` },
+      { id: 'grammar', title: 'Grammar Drills', icon: '文', desc: `Multiple-choice drills built from ${grammarCount} grammar patterns in the database.`, tags: ['Grammar'], color: '#a0816a', dueCount: Math.min(grammarCount, 8), link: `/grammar-drill?level=${user?.studyLevel ?? 'N5'}` },
+      { id: 'vocab', title: 'Vocabulary Quiz', icon: '語', desc: `Work through ${vocabCount} vocabulary entries from the database.`, tags: ['Vocabulary'], color: '#c97a4a', dueCount: Math.min(vocabCount, 16), link: `/flashcards?type=vocab&level=${user?.studyLevel ?? 'N5'}` },
       { id: 'reading', title: 'Reading Passages', icon: '📖', desc: 'Use your current JLPT level to guide study sessions.', tags: ['Reading'], color: '#7a8fc9', dueCount: user?.studyLevel === 'N5' ? 3 : 5 },
       { id: 'listening', title: 'Listening Drills', icon: '👂', desc: 'Practice listening with content aligned to your current level.', tags: ['Listening'], color: '#6abfa0', dueCount: user?.studyLevel === 'N3' ? 7 : 4 },
     ],
     stats: { reviewed: reviewedCount, accuracy, xpToday, minutesStudied },
     weakPoints,
   })
+})
+
+// GET /api/v1/practice/grammar — a multiple-choice drill generated from the
+// grammar bank at the requested level. Question types and distractors are
+// derived from real entries (see utils/grammarDrills.ts), so this scales with
+// the data rather than with hand-written question lists.
+router.get('/api/v1/practice/grammar', requireAuth, async (c) => {
+  const userId = c.get('userId') as string
+  const queryLevel = c.req.query('level')?.toUpperCase()
+  const requestedCount = Number(c.req.query('count'))
+  const count = Number.isFinite(requestedCount) ? Math.min(Math.max(Math.trunc(requestedCount), 1), 30) : 10
+
+  const user = await db.user.findUnique({ where: { id: userId }, select: { studyLevel: true } })
+  const level = ['N5', 'N4', 'N3', 'N2', 'N1'].includes(queryLevel ?? '')
+    ? (queryLevel as string)
+    : (user?.studyLevel ?? 'N5')
+
+  const rows = await db.grammarPattern.findMany({
+    where: { level },
+    select: { id: true, pattern: true, meaning: true, structure: true, level: true, examples: true },
+  })
+
+  const sources = rows.map((row) => {
+    const examples = Array.isArray(row.examples) ? row.examples : []
+    const first = (examples[0] ?? null) as Record<string, any> | null
+    return {
+      id: row.id,
+      pattern: row.pattern,
+      meaning: row.meaning,
+      structure: row.structure ?? '',
+      level: row.level,
+      example: String(first?.japanese ?? first?.ja ?? ''),
+      translation: String(first?.english ?? first?.en ?? ''),
+    }
+  })
+
+  const questions = buildGrammarDrill(sources, count)
+  return c.json({ level, count: questions.length, available: sources.length, questions })
 })
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

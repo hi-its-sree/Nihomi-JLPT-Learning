@@ -73,7 +73,7 @@ function GrammarCard({ g, expanded, onToggle }) {
               </div>
 
               <div style={{ display: 'flex', gap: 8 }}>
-                <Link to="/practice" className="primary-btn btn-sm" onClick={e => e.stopPropagation()}>Practice drill</Link>
+                <Link to={`/grammar-drill?level=${g.level}`} className="primary-btn btn-sm" onClick={e => e.stopPropagation()}>Practice drill</Link>
                 <Link to="/flashcards" className="ghost-btn btn-sm" onClick={e => e.stopPropagation()}>Add to SRS</Link>
               </div>
             </div>
@@ -154,7 +154,12 @@ export default function GrammarPage() {
             onChange={e => setSearch(e.target.value)}
             style={{ flex: '1 1 240px', maxWidth: 360 }}
           />
-          <Link to="/practice" className="secondary-btn">Grammar Drills →</Link>
+          <Link
+            to={`/grammar-drill?level=${effectiveLevel === 'All' ? 'N5' : effectiveLevel}`}
+            className="primary-btn"
+          >
+            文 Grammar Drills →
+          </Link>
         </div>
       </motion.div>
 

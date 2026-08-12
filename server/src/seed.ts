@@ -3,6 +3,15 @@ import path from 'path'
 import bcrypt from 'bcryptjs'
 import { db } from './db'
 
+async function pathExists(target: string) {
+  try {
+    await fs.access(target)
+    return true
+  } catch {
+    return false
+  }
+}
+
 function normalizeLevel(value: string | number | undefined) {
   const raw = String(value ?? '').trim().toUpperCase().replace(/^JLPT\s*/, '')
   return ['N1', 'N2', 'N3', 'N4', 'N5', 'OTHER'].includes(raw) ? raw : 'OTHER'
@@ -64,6 +73,11 @@ async function seedDemoUser() {
 
 async function seedKanji(dataDir: string) {
   const kanjiDir = path.join(dataDir, 'json', 'kanji')
+  if (!(await pathExists(kanjiDir))) {
+    console.log(`Skipping kanji seed: ${kanjiDir} not found`)
+    return
+  }
+
   const files = (await fs.readdir(kanjiDir)).filter((file) => file.endsWith('.json')).sort()
 
   let imported = 0
@@ -98,6 +112,11 @@ async function seedKanji(dataDir: string) {
 
 async function seedVocabulary(dataDir: string) {
   const vocabDir = path.join(dataDir, 'json', 'vocab')
+  if (!(await pathExists(vocabDir))) {
+    console.log(`Skipping vocabulary seed: ${vocabDir} not found`)
+    return
+  }
+
   const files = (await fs.readdir(vocabDir)).filter((file) => file.endsWith('.json')).sort()
 
   let imported = 0
@@ -141,6 +160,11 @@ async function seedVocabulary(dataDir: string) {
 
 async function seedGrammar(dataDir: string) {
   const grammarFile = path.join(dataDir, 'grammar', 'hanabira_all_jlpt_grammar.csv')
+  if (!(await pathExists(grammarFile))) {
+    console.log(`Skipping grammar seed: ${grammarFile} not found`)
+    return
+  }
+
   const content = await fs.readFile(grammarFile, 'utf8')
   const lines = content.split(/\r?\n/).filter(Boolean)
   if (lines.length < 2) {
