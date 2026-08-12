@@ -1,7 +1,8 @@
 import axios from 'axios'
 
-// Prefer explicit VITE_API_URL when set; otherwise use relative paths so Vite can proxy requests.
-const defaultHost = import.meta.env.VITE_API_URL || ''
+// Prefer an explicit API URL when provided; otherwise use the current browser origin so
+// requests work through the reverse proxy in Docker and through Vite's dev proxy locally.
+const defaultHost = import.meta.env.VITE_API_URL || (typeof window !== 'undefined' ? window.location.origin : '')
 
 const api = axios.create({
   baseURL: defaultHost,

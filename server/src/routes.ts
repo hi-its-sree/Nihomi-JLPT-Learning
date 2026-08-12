@@ -5,6 +5,7 @@ import { requireAuth } from './middleware/requireAuth'
 import authRoutes from './routes/auth'
 import kanjiRoutes from './routes/kanji'
 import journeyRoutes from './routes/journey'
+import { buildMockTestsPayload } from './utils/mockTests'
 
 const router = new Hono()
 
@@ -712,7 +713,7 @@ function vocabToCard(v: { id: string; word: string; reading: string; meaning: st
     // already pure kana) — fall back to the word itself rather than show a blank line.
     id: `vocab:${v.id}`, cardType: 'vocabulary', front: v.word, frontReading: v.reading || v.word,
     back: v.meaning, example: v.example ?? '', level: v.level?.toUpperCase() ?? 'N5',
-    isNew: true, reviewCount: 0,
+    isNew: true, reviewCount: 0, addedManually: false,
   }
 }
 
@@ -721,19 +722,69 @@ function kanjiToCard(k: { id: string; character: string; kunReadings: string[]; 
     id: `kanji:${k.id}`, cardType: 'kanji', front: k.character,
     frontReading: [...k.kunReadings, ...k.onReadings].join('、'),
     back: k.meaning, example: '', level: k.level?.toUpperCase() ?? 'N5',
-    isNew: true, reviewCount: 0,
+    isNew: true, reviewCount: 0, addedManually: false,
   }
 }
 
 // GET /api/v1/flashcards — real due-card queue: cards the user has reviewed before
 // that are due again, topped up with fresh cards from the vocabulary/kanji banks at
 // their level. Nothing here is hardcoded or mocked.
+//
+// ?source=mine switches to a different view entirely: only the cards the user
+// explicitly added (from the Kanji pages, etc.) via POST /flashcards/kanji/:id —
+// their own curated set, independent of the auto-generated due queue.
+//
+// ?source=level browses every kanji at a given level straight from the bank —
+// for learning a level's kanji directly, not just whatever the SRS queue is due to serve.
 router.get('/api/v1/flashcards', requireAuth, async (c) => {
   const userId = c.get('userId') as string
   const now = new Date()
+  const source = c.req.query('source') || (c.req.query('mine') === 'true' ? 'mine' : 'due')
 
-  const [user, dueReviews, allUserReviews] = await Promise.all([
-    db.user.findUnique({ where: { id: userId }, select: { studyLevel: true } }),
+  const user = await db.user.findUnique({ where: { id: userId }, select: { studyLevel: true } })
+  const queryLevel = c.req.query('level')?.toUpperCase()
+  const requestedLevel = FLASHCARD_LEVELS.includes(queryLevel as (typeof FLASHCARD_LEVELS)[number])
+    ? (queryLevel as (typeof FLASHCARD_LEVELS)[number])
+    : undefined
+  const level = requestedLevel ?? (user?.studyLevel ?? 'N5')
+
+  if (source === 'mine') {
+    const myReviews = await db.flashcardReview.findMany({
+      where: { userId, addedManually: true },
+      include: { vocabulary: true, kanji: true },
+      orderBy: { createdAt: 'desc' },
+    })
+
+    const myCards = myReviews
+      .filter((r) => r.vocabulary || r.kanji)
+      .map((r) => {
+        const card = r.vocabulary ? vocabToCard(r.vocabulary) : kanjiToCard(r.kanji!)
+        return { ...card, isNew: r.reviewCount === 0, reviewCount: r.reviewCount, addedManually: true }
+      })
+      .filter((card) => !requestedLevel || card.level === requestedLevel)
+
+    return c.json({ deck: myCards, due: myCards.length, newCount: myCards.filter((cd) => cd.isNew).length, level, source: 'mine' })
+  }
+
+  if (source === 'level') {
+    const [levelKanji, reviews] = await Promise.all([
+      db.kanjiEntry.findMany({ where: { level }, orderBy: { character: 'asc' } }),
+      db.flashcardReview.findMany({ where: { userId, kanjiId: { not: null } }, select: { kanjiId: true, reviewCount: true, addedManually: true } }),
+    ])
+
+    const reviewByKanjiId = new Map(reviews.map((r) => [r.kanjiId as string, r]))
+    const levelCards = levelKanji.map((k) => {
+      const card = kanjiToCard(k)
+      const review = reviewByKanjiId.get(k.id)
+      return review
+        ? { ...card, isNew: review.reviewCount === 0, reviewCount: review.reviewCount, addedManually: review.addedManually }
+        : card
+    })
+
+    return c.json({ deck: levelCards, due: levelCards.length, newCount: levelCards.filter((cd) => cd.isNew).length, level, source: 'level' })
+  }
+
+  const [dueReviews, allUserReviews] = await Promise.all([
     db.flashcardReview.findMany({
       where: { userId, nextReview: { lte: now } },
       include: { vocabulary: true, kanji: true },
@@ -743,11 +794,6 @@ router.get('/api/v1/flashcards', requireAuth, async (c) => {
     db.flashcardReview.findMany({ where: { userId }, select: { vocabularyId: true, kanjiId: true } }),
   ])
 
-  const queryLevel = c.req.query('level')?.toUpperCase()
-  const level = FLASHCARD_LEVELS.includes(queryLevel as (typeof FLASHCARD_LEVELS)[number])
-    ? queryLevel!
-    : (user?.studyLevel ?? 'N5')
-
   const seenVocabIds = allUserReviews.map((r) => r.vocabularyId).filter((id): id is string => Boolean(id))
   const seenKanjiIds = allUserReviews.map((r) => r.kanjiId).filter((id): id is string => Boolean(id))
 
@@ -755,7 +801,7 @@ router.get('/api/v1/flashcards', requireAuth, async (c) => {
     .filter((r) => r.vocabulary || r.kanji)
     .map((r) => {
       const card = r.vocabulary ? vocabToCard(r.vocabulary) : kanjiToCard(r.kanji!)
-      return { ...card, isNew: false, reviewCount: r.reviewCount }
+      return { ...card, isNew: false, reviewCount: r.reviewCount, addedManually: r.addedManually }
     })
 
   const remainingSlots = Math.max(0, FLASHCARD_BATCH_SIZE - dueCards.length)
@@ -774,7 +820,215 @@ router.get('/api/v1/flashcards', requireAuth, async (c) => {
 
   const newCards = [...newVocab.map(vocabToCard), ...newKanji.map(kanjiToCard)]
 
-  return c.json({ deck: [...dueCards, ...newCards], due: totalDue, newCount: newCards.length, level })
+  return c.json({ deck: [...dueCards, ...newCards], due: totalDue, newCount: newCards.length, level, source: 'due' })
+})
+
+// POST /api/v1/flashcards/kanji/:kanjiId — add a specific kanji to the user's
+// deck directly (from the Kanji list/detail pages) without forcing a review.
+// It surfaces immediately in the due queue (nextReview defaults to now) and
+// always shows up under the "My Flashcards" (?mine=true) view.
+router.post('/api/v1/flashcards/kanji/:kanjiId', requireAuth, async (c) => {
+  const userId = c.get('userId') as string
+  const kanjiId = c.req.param('kanjiId') ?? ''
+
+  const kanji = await db.kanjiEntry.findUnique({ where: { id: kanjiId } })
+  if (!kanji) return c.json({ error: 'Kanji not found' }, 404)
+
+  const existing = await db.flashcardReview.findUnique({
+    where: { userId_kanjiId: { userId, kanjiId } },
+  })
+  if (existing) {
+    if (!existing.addedManually) {
+      await db.flashcardReview.update({ where: { id: existing.id }, data: { addedManually: true } })
+    }
+    return c.json({ added: true, alreadyExisted: true })
+  }
+
+  await db.flashcardReview.create({
+    data: { userId, kanjiId, cardType: 'kanji', addedManually: true },
+  })
+
+  return c.json({ added: true, alreadyExisted: false }, 201)
+})
+
+// DELETE /api/v1/flashcards/kanji/:kanjiId — remove a kanji from the user's deck.
+router.delete('/api/v1/flashcards/kanji/:kanjiId', requireAuth, async (c) => {
+  const userId = c.get('userId') as string
+  const kanjiId = c.req.param('kanjiId') ?? ''
+  await db.flashcardReview.deleteMany({ where: { userId, kanjiId } })
+  return c.json({ removed: true })
+})
+
+// GET /api/v1/flashcards/kanji-ids — ids of kanji already in the user's deck,
+// so the Kanji pages can render "already added" state without loading the full deck.
+router.get('/api/v1/flashcards/kanji-ids', requireAuth, async (c) => {
+  const userId = c.get('userId') as string
+  const rows = await db.flashcardReview.findMany({
+    where: { userId, kanjiId: { not: null } },
+    select: { kanjiId: true },
+  })
+  return c.json({ kanjiIds: rows.map((r) => r.kanjiId) })
+})
+
+// ── Decks — user-created, renameable flashcard collections ───────────────────
+
+function normalizeDeckName(raw: unknown): string | null {
+  const name = String(raw ?? '').trim().slice(0, 40)
+  return name.length > 0 ? name : null
+}
+
+// GET /api/v1/decks — list the user's decks with card counts.
+router.get('/api/v1/decks', requireAuth, async (c) => {
+  const userId = c.get('userId') as string
+  const decks = await db.deck.findMany({
+    where: { userId },
+    orderBy: { createdAt: 'asc' },
+    include: { _count: { select: { items: true } } },
+  })
+  return c.json({ decks: decks.map((d) => ({ id: d.id, name: d.name, cardCount: d._count.items, createdAt: d.createdAt })) })
+})
+
+// POST /api/v1/decks { name } — create a new deck.
+router.post('/api/v1/decks', requireAuth, async (c) => {
+  const userId = c.get('userId') as string
+  let body: { name?: string }
+  try {
+    body = await c.req.json()
+  } catch {
+    return c.json({ error: 'Invalid JSON body' }, 400)
+  }
+
+  const name = normalizeDeckName(body.name)
+  if (!name) return c.json({ error: 'Deck name is required' }, 400)
+
+  const existing = await db.deck.findUnique({ where: { userId_name: { userId, name } } })
+  if (existing) return c.json({ error: 'You already have a deck with that name' }, 409)
+
+  const deck = await db.deck.create({ data: { userId, name } })
+  return c.json({ id: deck.id, name: deck.name, cardCount: 0, createdAt: deck.createdAt }, 201)
+})
+
+// PATCH /api/v1/decks/:deckId { name } — rename a deck.
+router.patch('/api/v1/decks/:deckId', requireAuth, async (c) => {
+  const userId = c.get('userId') as string
+  const deckId = c.req.param('deckId') ?? ''
+  let body: { name?: string }
+  try {
+    body = await c.req.json()
+  } catch {
+    return c.json({ error: 'Invalid JSON body' }, 400)
+  }
+
+  const name = normalizeDeckName(body.name)
+  if (!name) return c.json({ error: 'Deck name is required' }, 400)
+
+  const deck = await db.deck.findFirst({ where: { id: deckId, userId } })
+  if (!deck) return c.json({ error: 'Deck not found' }, 404)
+
+  const nameTaken = await db.deck.findUnique({ where: { userId_name: { userId, name } } })
+  if (nameTaken && nameTaken.id !== deckId) return c.json({ error: 'You already have a deck with that name' }, 409)
+
+  const updated = await db.deck.update({ where: { id: deckId }, data: { name } })
+  return c.json({ id: updated.id, name: updated.name })
+})
+
+// DELETE /api/v1/decks/:deckId — delete a deck and its groupings (the
+// underlying flashcard/SRS progress for its cards is untouched).
+router.delete('/api/v1/decks/:deckId', requireAuth, async (c) => {
+  const userId = c.get('userId') as string
+  const deckId = c.req.param('deckId') ?? ''
+  const result = await db.deck.deleteMany({ where: { id: deckId, userId } })
+  if (result.count === 0) return c.json({ error: 'Deck not found' }, 404)
+  return c.json({ removed: true })
+})
+
+// GET /api/v1/decks/:deckId/cards — the flashcards grouped into this deck.
+router.get('/api/v1/decks/:deckId/cards', requireAuth, async (c) => {
+  const userId = c.get('userId') as string
+  const deckId = c.req.param('deckId') ?? ''
+
+  const deck = await db.deck.findFirst({ where: { id: deckId, userId } })
+  if (!deck) return c.json({ error: 'Deck not found' }, 404)
+
+  const items = await db.deckItem.findMany({
+    where: { deckId },
+    include: { vocabulary: true, kanji: true },
+    orderBy: { createdAt: 'desc' },
+  })
+
+  const contentIds = items.map((i) => i.kanjiId ?? i.vocabularyId).filter((id): id is string => Boolean(id))
+  const reviews = await db.flashcardReview.findMany({
+    where: { userId, OR: [{ kanjiId: { in: contentIds } }, { vocabularyId: { in: contentIds } }] },
+  })
+  const reviewByContentId = new Map(reviews.map((r) => [(r.kanjiId ?? r.vocabularyId) as string, r]))
+
+  const cards = items
+    .filter((i) => i.vocabulary || i.kanji)
+    .map((i) => {
+      const card = i.vocabulary ? vocabToCard(i.vocabulary) : kanjiToCard(i.kanji!)
+      const review = reviewByContentId.get((i.kanjiId ?? i.vocabularyId) as string)
+      return review
+        ? { ...card, isNew: review.reviewCount === 0, reviewCount: review.reviewCount, addedManually: review.addedManually }
+        : card
+    })
+
+  return c.json({ deck: cards, due: cards.length, newCount: cards.filter((cd) => cd.isNew).length, deckId, deckName: deck.name, source: 'deck' })
+})
+
+// GET /api/v1/decks/kanji/:kanjiId — which of the user's decks already contain this kanji.
+router.get('/api/v1/decks/kanji/:kanjiId', requireAuth, async (c) => {
+  const userId = c.get('userId') as string
+  const kanjiId = c.req.param('kanjiId') ?? ''
+  const items = await db.deckItem.findMany({
+    where: { kanjiId, deck: { userId } },
+    select: { deckId: true },
+  })
+  return c.json({ deckIds: items.map((i) => i.deckId) })
+})
+
+// POST /api/v1/decks/:deckId/kanji/:kanjiId — add a kanji to a deck. Also
+// ensures the card has a FlashcardReview row (marked addedManually) so it's
+// schedulable and shows up in the regular due queue too.
+router.post('/api/v1/decks/:deckId/kanji/:kanjiId', requireAuth, async (c) => {
+  const userId = c.get('userId') as string
+  const deckId = c.req.param('deckId') ?? ''
+  const kanjiId = c.req.param('kanjiId') ?? ''
+
+  const [deck, kanji] = await Promise.all([
+    db.deck.findFirst({ where: { id: deckId, userId } }),
+    db.kanjiEntry.findUnique({ where: { id: kanjiId } }),
+  ])
+  if (!deck) return c.json({ error: 'Deck not found' }, 404)
+  if (!kanji) return c.json({ error: 'Kanji not found' }, 404)
+
+  await Promise.all([
+    db.deckItem.upsert({
+      where: { deckId_kanjiId: { deckId, kanjiId } },
+      create: { deckId, kanjiId },
+      update: {},
+    }),
+    db.flashcardReview.upsert({
+      where: { userId_kanjiId: { userId, kanjiId } },
+      create: { userId, kanjiId, cardType: 'kanji', addedManually: true },
+      update: { addedManually: true },
+    }),
+  ])
+
+  return c.json({ added: true }, 201)
+})
+
+// DELETE /api/v1/decks/:deckId/kanji/:kanjiId — remove a kanji from this deck
+// only (its SRS progress and membership in other decks are untouched).
+router.delete('/api/v1/decks/:deckId/kanji/:kanjiId', requireAuth, async (c) => {
+  const userId = c.get('userId') as string
+  const deckId = c.req.param('deckId') ?? ''
+  const kanjiId = c.req.param('kanjiId') ?? ''
+
+  const deck = await db.deck.findFirst({ where: { id: deckId, userId } })
+  if (!deck) return c.json({ error: 'Deck not found' }, 404)
+
+  await db.deckItem.deleteMany({ where: { deckId, kanjiId } })
+  return c.json({ removed: true })
 })
 
 // POST /api/v1/flashcards/:id/review — persists a real SM-2-style spaced-repetition
@@ -913,18 +1167,29 @@ router.get('/api/v1/practice', requireAuth, async (c) => {
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-router.get('/api/v1/tests', (c) => {
-  return c.json({
-    tests: [
-      { id: 't-n5', level: 'N5', title: 'N5 Full Mock Test', sections: 3, questions: 110, durationMin: 105, bestScore: 92, attempts: 3 },
-      { id: 't-n4', level: 'N4', title: 'N4 Full Mock Test', sections: 3, questions: 125, durationMin: 125, bestScore: 78, attempts: 2 },
-      { id: 't-n3', level: 'N3', title: 'N3 Full Mock Test', sections: 3, questions: 140, durationMin: 140, bestScore: 71, attempts: 1 },
-      { id: 't-n3-vocab', level: 'N3', title: 'N3 Vocabulary Section', sections: 1, questions: 35, durationMin: 35, bestScore: 83, attempts: 4 },
-      { id: 't-n3-gram', level: 'N3', title: 'N3 Grammar Section', sections: 1, questions: 45, durationMin: 50, bestScore: 68, attempts: 2 },
-      { id: 't-n2', level: 'N2', title: 'N2 Full Mock Test', sections: 3, questions: 155, durationMin: 155, bestScore: null, attempts: 0 },
-    ],
-    readiness: { N5: 92, N4: 78, N3: 71, N2: 0, N1: 0 },
+router.get('/api/v1/tests', requireAuth, async (c) => {
+  const userId = c.get('userId') as string
+  const [user, progressEntries, vocabularyEntries, kanjiEntries, grammarEntries] = await Promise.all([
+    db.user.findUnique({ where: { id: userId }, select: { studyLevel: true } }),
+    db.userProgress.findMany({ where: { userId }, select: { level: true, category: true, mastery: true } }),
+    db.vocabulary.findMany({ take: 8, select: { word: true, meaning: true } }),
+    db.kanjiEntry.findMany({ take: 8, select: { character: true, meaning: true } }),
+    db.grammarPattern.findMany({ take: 8, select: { pattern: true, meaning: true } }),
+  ])
+
+  if (!user) return c.json({ error: 'User not found' }, 404)
+
+  const availableLevels = ['N5', 'N4', 'N3', 'N2', 'N1']
+  const payload = buildMockTestsPayload({
+    currentLevel: user.studyLevel,
+    progressEntries: progressEntries.map((entry) => ({ level: entry.level, category: entry.category, mastery: entry.mastery })),
+    vocabularyEntries: vocabularyEntries.map((entry) => ({ word: entry.word, meaning: entry.meaning })),
+    kanjiEntries: kanjiEntries.map((entry) => ({ character: entry.character, meaning: entry.meaning })),
+    grammarEntries: grammarEntries.map((entry) => ({ pattern: entry.pattern, meaning: entry.meaning })),
+    availableLevels,
   })
+
+  return c.json(payload)
 })
 
 // ── Progress & Analytics ──────────────────────────────────────────────────────

@@ -1,0 +1,65 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: jlpt-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-jlpt_learning}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-jlpt_learning}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: jlpt-backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PORT: 4000
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/jlpt_learning?schema=public}
+      JWT_SECRET: ${JWT_SECRET:-dev-secret}
+      DATA_DIR: /app/data
+    ports:
+      - "${BACKEND_HOST_PORT:-4001}:4000"
+    volumes:
+      - ./OpenJLPT/data/json:/app/data/json:ro
+      - ./client/src/pyfiles/grammar:/app/data/grammar:ro
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: jlpt-frontend
+    depends_on:
+      - backend
+    environment:
+      VITE_API_URL: ${VITE_API_URL:-}
+    ports:
+      - "${FRONTEND_HOST_PORT:-5174}:5173"
+    restart: unless-stopped
+
+  proxy:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    container_name: jlpt-proxy
+    depends_on:
+      - frontend
+      - backend
+    ports:
+      - "${PROXY_HOST_PORT:-8080}:80"
+    restart: unless-stopped
+
+volumes:
+  postgres-data:

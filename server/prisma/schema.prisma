@@ -32,6 +32,7 @@ model User {
   achievements UserAchievement[]
   lessonHistory LessonHistory[]
   journeyProgress JourneyProgress[]
+  decks        Deck[]
 }
 
 model Vocabulary {
@@ -45,6 +46,7 @@ model Vocabulary {
   exampleTl  String?
 
   flashcards FlashcardReview[]
+  deckItems  DeckItem[]
 }
 
 model KanjiEntry {
@@ -57,6 +59,7 @@ model KanjiEntry {
   strokeCount Int?
 
   flashcards FlashcardReview[]
+  deckItems  DeckItem[]
 }
 
 model GrammarPattern {
@@ -86,12 +89,43 @@ model FlashcardReview {
   reviewCount  Int      @default(0)
   lapses       Int      @default(0)
   lastRating   String?
+  addedManually Boolean @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([userId, vocabularyId])
   @@unique([userId, kanjiId])
+}
+
+// A user-created, renameable collection of flashcards ("study set"). Distinct
+// from the SRS scheduling state in FlashcardReview — a Deck is just an
+// organizational grouping; the same card can live in several decks while
+// keeping a single shared review/interval history.
+model Deck {
+  id        String     @id @default(cuid())
+  userId    String
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  items     DeckItem[]
+
+  @@unique([userId, name])
+}
+
+model DeckItem {
+  id           String      @id @default(cuid())
+  deckId       String
+  deck         Deck        @relation(fields: [deckId], references: [id], onDelete: Cascade)
+  vocabularyId String?
+  vocabulary   Vocabulary? @relation(fields: [vocabularyId], references: [id])
+  kanjiId      String?
+  kanji        KanjiEntry? @relation(fields: [kanjiId], references: [id])
+  createdAt    DateTime    @default(now())
+
+  @@unique([deckId, vocabularyId])
+  @@unique([deckId, kanjiId])
 }
 
 model UserProgress {

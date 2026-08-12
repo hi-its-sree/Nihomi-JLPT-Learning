@@ -4,6 +4,7 @@ import { requireAuth } from './middleware/requireAuth';
 import authRoutes from './routes/auth';
 import kanjiRoutes from './routes/kanji';
 import journeyRoutes from './routes/journey';
+import { buildMockTestsPayload } from './utils/mockTests';
 const router = new Hono();
 const LEVEL_ORDER = ['N5', 'N4', 'N3', 'N2', 'N1'];
 const LEVEL_META = {
@@ -755,6 +756,7 @@ router.post('/api/v1/flashcards/:id/review', requireAuth, async (c) => {
     });
     const xpGained = rating === 'easy' ? 10 : rating === 'good' ? 7 : rating === 'hard' ? 4 : 2;
     await db.user.update({ where: { id: userId }, data: { xp: { increment: xpGained } } });
+    await buildAchievementPayload(userId);
     return c.json({
         id: cardId,
         rating,
@@ -802,18 +804,27 @@ router.get('/api/v1/practice', requireAuth, async (c) => {
     });
 });
 // ── Tests ─────────────────────────────────────────────────────────────────────
-router.get('/api/v1/tests', (c) => {
-    return c.json({
-        tests: [
-            { id: 't-n5', level: 'N5', title: 'N5 Full Mock Test', sections: 3, questions: 110, durationMin: 105, bestScore: 92, attempts: 3 },
-            { id: 't-n4', level: 'N4', title: 'N4 Full Mock Test', sections: 3, questions: 125, durationMin: 125, bestScore: 78, attempts: 2 },
-            { id: 't-n3', level: 'N3', title: 'N3 Full Mock Test', sections: 3, questions: 140, durationMin: 140, bestScore: 71, attempts: 1 },
-            { id: 't-n3-vocab', level: 'N3', title: 'N3 Vocabulary Section', sections: 1, questions: 35, durationMin: 35, bestScore: 83, attempts: 4 },
-            { id: 't-n3-gram', level: 'N3', title: 'N3 Grammar Section', sections: 1, questions: 45, durationMin: 50, bestScore: 68, attempts: 2 },
-            { id: 't-n2', level: 'N2', title: 'N2 Full Mock Test', sections: 3, questions: 155, durationMin: 155, bestScore: null, attempts: 0 },
-        ],
-        readiness: { N5: 92, N4: 78, N3: 71, N2: 0, N1: 0 },
+router.get('/api/v1/tests', requireAuth, async (c) => {
+    const userId = c.get('userId');
+    const [user, progressEntries, vocabularyEntries, kanjiEntries, grammarEntries] = await Promise.all([
+        db.user.findUnique({ where: { id: userId }, select: { studyLevel: true } }),
+        db.userProgress.findMany({ where: { userId }, select: { level: true, category: true, mastery: true } }),
+        db.vocabulary.findMany({ take: 8, select: { word: true, meaning: true } }),
+        db.kanjiEntry.findMany({ take: 8, select: { character: true, meaning: true } }),
+        db.grammarPattern.findMany({ take: 8, select: { pattern: true, meaning: true } }),
+    ]);
+    if (!user)
+        return c.json({ error: 'User not found' }, 404);
+    const availableLevels = ['N5', 'N4', 'N3', 'N2', 'N1'];
+    const payload = buildMockTestsPayload({
+        currentLevel: user.studyLevel,
+        progressEntries: progressEntries.map((entry) => ({ level: entry.level, category: entry.category, mastery: entry.mastery })),
+        vocabularyEntries: vocabularyEntries.map((entry) => ({ word: entry.word, meaning: entry.meaning })),
+        kanjiEntries: kanjiEntries.map((entry) => ({ character: entry.character, meaning: entry.meaning })),
+        grammarEntries: grammarEntries.map((entry) => ({ pattern: entry.pattern, meaning: entry.meaning })),
+        availableLevels,
     });
+    return c.json(payload);
 });
 // ── Progress & Analytics ──────────────────────────────────────────────────────
 router.get('/api/v1/progress', requireAuth, async (c) => {

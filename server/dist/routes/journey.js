@@ -79,6 +79,7 @@ journey.post('/chapters/:chapterId/complete', async (c) => {
         db.user.update({ where: { id: userId }, data: { xp: { increment: reward.xp } } }),
     ]);
     const state = await buildJourneyState(userId);
+    await import('../routes').then(({ default: routes }) => routes);
     return c.json({
         chapterId,
         xpGained: reward.xp,

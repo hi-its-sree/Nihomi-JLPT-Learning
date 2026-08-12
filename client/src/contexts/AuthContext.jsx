@@ -7,10 +7,21 @@ const AuthContext = createContext({
   loading: true,
   login: async () => {},
   signup: async () => {},
+  setSecurityQuestions: async () => {},
   logout: () => {},
   isAuthenticated: false,
 })
 const STORAGE_KEY = 'jlpt-auth'
+
+function persistAuth(user, token) {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ user, token }))
+}
+
+function clearStoredAuth() {
+  if (typeof window === 'undefined') return
+  window.localStorage.removeItem(STORAGE_KEY)
+}
 
 function readStoredAuth() {
   if (typeof window === 'undefined') return { user: null, token: null }
@@ -31,9 +42,9 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     if (user && token) {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ user, token }))
+      persistAuth(user, token)
     } else {
-      window.localStorage.removeItem(STORAGE_KEY)
+      clearStoredAuth()
     }
   }, [user, token])
 
@@ -64,30 +75,46 @@ export function AuthProvider({ children }) {
 
   const login = async (email, password) => {
     const { data } = await api.post('/auth/login', { email, password })
-    setUser(data.user)
-    setToken(data.token)
+    const nextAuth = { user: data.user, token: data.token }
+    persistAuth(nextAuth.user, nextAuth.token)
+    setUser(nextAuth.user)
+    setToken(nextAuth.token)
     return data
   }
 
-  const signup = async (email, password, username, recoveryAnswers = []) => {
-    const { data } = await api.post('/auth/register', { email, password, username, recoveryAnswers })
-    setUser(data.user)
-    setToken(data.token)
+  const signup = async (email, password, username) => {
+    const { data } = await api.post('/auth/register', { email, password, username })
+    const nextAuth = { user: data.user, token: data.token }
+    persistAuth(nextAuth.user, nextAuth.token)
+    setUser(nextAuth.user)
+    setToken(nextAuth.token)
     return data
   }
 
-  const forgotPassword = async (email, answers, newPassword) => {
-    const { data } = await api.post('/auth/forgot-password', { email, answers, newPassword })
+  const setSecurityQuestions = async (answers) => {
+    const { data } = await api.post('/auth/security-questions', { answers })
+    setUser(prev => (prev ? { ...prev, hasRecoveryAnswers: true } : prev))
+    return data
+  }
+
+  const verifyRecoveryAnswers = async (email, answers) => {
+    const { data } = await api.post('/auth/forgot-password/verify', { email, answers })
+    return data
+  }
+
+  const resetPassword = async (resetToken, newPassword) => {
+    const { data } = await api.post('/auth/forgot-password/reset', { resetToken, newPassword })
     return data
   }
 
   const logout = () => {
+    clearStoredAuth()
     setUser(null)
     setToken(null)
   }
 
   const value = useMemo(
-    () => ({ user, token, loading, login, signup, forgotPassword, logout, isAuthenticated: Boolean(user && token) }),
+    () => ({ user, token, loading, login, signup, setSecurityQuestions, verifyRecoveryAnswers, resetPassword, logout, isAuthenticated: Boolean(user && token) }),
     [user, token, loading],
   )
 

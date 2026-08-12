@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Link, useParams } from 'react-router-dom'
 import api from '../lib/api'
+import DeckMenu from '../components/DeckMenu'
+import FloatingMenu from '../components/FloatingMenu'
 
 const LEVELS = ['All', 'N5', 'N4', 'N3', 'N2', 'N1', 'Other']
 const LEVEL_RE = /^(N[1-5]|OTHER)$/i
@@ -33,6 +35,8 @@ export default function KanjiPage() {
   const [pagination, setPagination] = useState({ total: 0, page: 1, totalPages: 1, hasNextPage: false, hasPrevPage: false })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [flashcardIds, setFlashcardIds] = useState(() => new Set())
+  const [openMenu, setOpenMenu] = useState(null) // { character, top, right } | null
 
   const effectiveLevel = normalizeLevelFilterValue(levelParam ?? activeLevel)
   const meta = levelParam ? LEVEL_META[levelParam] : null
@@ -124,6 +128,26 @@ export default function KanjiPage() {
   useEffect(() => {
     setPage(1)
   }, [effectiveLevel, search])
+
+  useEffect(() => {
+    let mounted = true
+    api.get('/api/v1/flashcards/kanji-ids')
+      .then(({ data }) => {
+        if (!mounted) return
+        setFlashcardIds(new Set(data.kanjiIds || []))
+      })
+      .catch(() => {})
+    return () => { mounted = false }
+  }, [])
+
+  function handleMembershipChange(kanjiId, hasAny) {
+    setFlashcardIds(prev => {
+      const next = new Set(prev)
+      if (hasAny) next.add(kanjiId)
+      else next.delete(kanjiId)
+      return next
+    })
+  }
 
   return (
     <div className="page-shell">
@@ -225,12 +249,16 @@ export default function KanjiPage() {
               const meaning = k.meaning || '—'
               const badgeLevel = k.level || 'N5'
 
+              const isAdded = flashcardIds.has(k.id)
+              const isMenuOpen = openMenu?.character === k.character
+
               return (
                 <motion.div
                   key={k.character}
                   initial={{ opacity: 0, scale: 0.9 }}
                   animate={{ opacity: 1, scale: 1 }}
                   transition={{ delay: i * 0.03, duration: 0.3 }}
+                  style={{ position: 'relative' }}
                 >
                   <Link to={`/kanji-detail/${encodeURIComponent(k.character)}`} className="kanji-card">
                     <div className="kanji-char">{k.character}</div>
@@ -241,6 +269,37 @@ export default function KanjiPage() {
                       <span style={{ fontSize: '0.68rem', color: 'var(--muted-plum)', fontWeight: 600 }}>{k.strokeCount || 0} strokes</span>
                     </div>
                   </Link>
+
+                  <div style={{ position: 'absolute', top: 8, right: 8 }}>
+                    <button
+                      type="button"
+                      aria-label="Flashcard actions"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        if (isMenuOpen) {
+                          setOpenMenu(null)
+                          return
+                        }
+                        const rect = e.currentTarget.getBoundingClientRect()
+                        setOpenMenu({ character: k.character, top: rect.bottom + 6, right: window.innerWidth - rect.right })
+                      }}
+                      style={{
+                        width: 24, height: 24, borderRadius: '50%', border: 'none',
+                        background: isAdded ? 'var(--terracotta)' : 'rgba(255,255,255,0.85)',
+                        color: isAdded ? '#fff' : 'var(--muted-plum)',
+                        cursor: 'pointer', fontWeight: 900, lineHeight: 1, fontSize: '0.9rem',
+                      }}
+                    >
+                      ⋮
+                    </button>
+
+                    {isMenuOpen && (
+                      <FloatingMenu position={{ top: openMenu.top, right: openMenu.right }} onClose={() => setOpenMenu(null)}>
+                        <DeckMenu kanjiId={k.id} onMembershipChange={(hasAny) => handleMembershipChange(k.id, hasAny)} />
+                      </FloatingMenu>
+                    )}
+                  </div>
                 </motion.div>
               )
             })}

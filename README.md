@@ -31,6 +31,29 @@ The API will be available at http://localhost:4000
 - GET /api/v1/dashboard
 - GET /api/v1/levels
 
+## Run with Docker
+
+From the repository root:
+
+```bash
+docker compose up --build
+```
+
+This starts:
+- frontend at http://localhost:5173
+- backend at http://localhost:4001
+- PostgreSQL at localhost:5433 (mapped from container port 5432 to avoid conflicts with existing local PostgreSQL installs)
+
+### Environment
+
+Copy the server example environment if needed:
+
+```bash
+cp server/.env.example server/.env
+```
+
+For a dev tunnel, expose the frontend and backend ports with your tunnel tool after the containers are running.
+
 ## Next steps
 
 - Add Prisma schema and database migrations

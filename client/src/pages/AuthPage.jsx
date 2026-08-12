@@ -2,17 +2,28 @@ import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
+import { SECURITY_QUESTIONS, RECOVERY_ANSWERS_REQUIRED } from '../lib/securityQuestions'
 
 const ART_KANJI = ['日', '本', '語', '学', '習', '文', '字', '書']
 
 export default function AuthPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [mode, setMode] = useState(searchParams.get('mode') === 'signup' ? 'signup' : 'login')
-  const [form, setForm] = useState({ email: '', password: '', username: '', recoveryAnswers: ['', '', '', '', ''] })
+  const [form, setForm] = useState({ email: '', password: '', username: '' })
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
   const [submitting, setSubmitting] = useState(false)
+
+  // Forgot-password is its own 2-step wizard: pick+answer 3 of 5 questions,
+  // then (once verified) choose a new password.
+  const [forgotStep, setForgotStep] = useState('verify') // 'verify' | 'reset'
+  const [selectedQuestions, setSelectedQuestions] = useState([])
+  const [questionAnswers, setQuestionAnswers] = useState({})
+  const [resetToken, setResetToken] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+
   const navigate = useNavigate()
-  const { login, signup, forgotPassword } = useAuth()
+  const { login, signup, verifyRecoveryAnswers, resetPassword } = useAuth()
 
   useEffect(() => {
     const m = searchParams.get('mode')
@@ -23,30 +34,86 @@ export default function AuthPage() {
     return (e) => setForm(prev => ({ ...prev, [key]: e.target.value }))
   }
 
+  function toggleQuestion(index) {
+    setSelectedQuestions(prev => {
+      if (prev.includes(index)) {
+        setQuestionAnswers(a => {
+          const next = { ...a }
+          delete next[index]
+          return next
+        })
+        return prev.filter(i => i !== index)
+      }
+      if (prev.length >= RECOVERY_ANSWERS_REQUIRED) return prev
+      return [...prev, index]
+    })
+  }
+
+  async function handleVerifySubmit() {
+    if (selectedQuestions.length !== RECOVERY_ANSWERS_REQUIRED) {
+      setError(`Please select exactly ${RECOVERY_ANSWERS_REQUIRED} of the 5 security questions.`)
+      return
+    }
+    if (selectedQuestions.some(i => !(questionAnswers[i] || '').trim())) {
+      setError('Please answer all of your selected questions.')
+      return
+    }
+
+    setSubmitting(true)
+    try {
+      const answers = SECURITY_QUESTIONS.map((_, i) => (selectedQuestions.includes(i) ? questionAnswers[i] : ''))
+      const { resetToken: token } = await verifyRecoveryAnswers(form.email, answers)
+      setResetToken(token)
+      setForgotStep('reset')
+    } catch (err) {
+      setError(err?.response?.data?.error || 'We could not verify your answers. Please try again.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function handleResetSubmit() {
+    if (form.password !== confirmPassword) {
+      setError('Passwords do not match.')
+      return
+    }
+
+    setSubmitting(true)
+    try {
+      await resetPassword(resetToken, form.password)
+      switchMode('login')
+      setNotice('Password reset successfully. Please sign in with your new password.')
+    } catch (err) {
+      setError(err?.response?.data?.error || 'We could not reset your password. Please try again.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
+    setNotice('')
+
+    if (mode === 'forgot') {
+      if (forgotStep === 'verify') await handleVerifySubmit()
+      else await handleResetSubmit()
+      return
+    }
+
     setSubmitting(true)
     try {
       if (mode === 'login') {
         await login(form.email, form.password)
-      } else if (mode === 'signup') {
-        await signup(form.email, form.password, form.username, form.recoveryAnswers)
-      } else if (mode === 'forgot') {
-        await forgotPassword(form.email, form.recoveryAnswers, form.password)
-        setMode('login')
-        setForm(prev => ({ ...prev, password: '', recoveryAnswers: ['', '', '', '', ''] }))
-        setError('Password updated successfully. Please sign in with your new password.')
-      }
-      if (mode !== 'forgot') {
         navigate('/dashboard')
+      } else if (mode === 'signup') {
+        await signup(form.email, form.password, form.username)
+        navigate('/security-questions')
       }
     } catch (err) {
       setError(err?.response?.data?.error || (mode === 'login'
         ? 'Invalid credentials. Please check your email and password.'
-        : mode === 'forgot'
-          ? 'We could not reset your password. Please try again.'
-          : 'Could not create account. Please try again.'))
+        : 'Could not create account. Please try again.'))
     } finally {
       setSubmitting(false)
     }
@@ -56,7 +123,13 @@ export default function AuthPage() {
     setMode(next)
     setSearchParams({ mode: next === 'login' ? 'login' : next })
     setError('')
-    setForm({ email: '', password: '', username: '', recoveryAnswers: ['', '', '', '', ''] })
+    setNotice('')
+    setForm({ email: '', password: '', username: '' })
+    setForgotStep('verify')
+    setSelectedQuestions([])
+    setQuestionAnswers({})
+    setResetToken('')
+    setConfirmPassword('')
   }
 
   return (
@@ -129,7 +202,7 @@ export default function AuthPage() {
       <div className="auth-form-side">
         <AnimatePresence mode="wait">
           <motion.div
-            key={mode}
+            key={mode === 'forgot' ? `forgot-${forgotStep}` : mode}
             className="auth-card"
             initial={{ opacity: 0, x: 24 }}
             animate={{ opacity: 1, x: 0 }}
@@ -143,13 +216,19 @@ export default function AuthPage() {
                 {mode === 'login' ? 'Welcome back' : mode === 'forgot' ? 'Recover your account' : 'Start learning'}
               </p>
               <h2 className="auth-card-title" style={{ marginTop: 8 }}>
-                {mode === 'login' ? 'Sign in to continue' : mode === 'forgot' ? 'Reset your password' : 'Create your account'}
+                {mode === 'login'
+                  ? 'Sign in to continue'
+                  : mode === 'forgot'
+                    ? (forgotStep === 'verify' ? 'Verify your identity' : 'Choose a new password')
+                    : 'Create your account'}
               </h2>
               <p className="auth-card-sub" style={{ marginTop: 6 }}>
                 {mode === 'login'
                   ? 'Resume your study streak and pick up where you left off.'
                   : mode === 'forgot'
-                    ? 'Answer your five security questions to set a new password.'
+                    ? (forgotStep === 'verify'
+                        ? `Step 1 of 2 — select and answer ${RECOVERY_ANSWERS_REQUIRED} of your 5 security questions.`
+                        : 'Step 2 of 2 — your identity is verified. Set a new password below.')
                     : 'Join thousands of learners on their path to JLPT success.'}
               </p>
             </div>
@@ -169,59 +248,122 @@ export default function AuthPage() {
                 </label>
               )}
 
-              {(mode === 'signup' || mode === 'forgot') && (
-                <div style={{ display: 'grid', gap: 10 }}>
-                  {[
-                    'What was your first pet’s name?',
-                    'What was your childhood nickname?',
-                    'What city or town were you born in?',
-                    'What is your favorite hobby?',
-                    'What was the name of your first school?',
-                  ].map((question, index) => (
-                    <label className="field-label" key={question}>
-                      {question}
-                      <input
-                        className="field-input"
-                        value={form.recoveryAnswers[index] || ''}
-                        onChange={(e) => {
-                          const next = [...form.recoveryAnswers]
-                          next[index] = e.target.value
-                          setForm(prev => ({ ...prev, recoveryAnswers: next }))
-                        }}
-                        placeholder="Your answer"
-                        required={mode === 'signup' || mode === 'forgot'}
-                      />
-                    </label>
-                  ))}
-                </div>
+              {mode === 'forgot' && forgotStep === 'verify' && (
+                <>
+                  <label className="field-label">
+                    Email address
+                    <input
+                      className="field-input"
+                      type="email"
+                      value={form.email}
+                      onChange={field('email')}
+                      placeholder="you@example.com"
+                      required
+                      autoComplete="email"
+                    />
+                  </label>
+
+                  <div style={{ display: 'grid', gap: 10 }}>
+                    <p style={{ fontSize: '0.78rem', color: 'var(--muted-plum)', margin: 0 }}>
+                      Select {RECOVERY_ANSWERS_REQUIRED} of these 5 questions ({selectedQuestions.length}/{RECOVERY_ANSWERS_REQUIRED} selected), then answer them.
+                    </p>
+                    {SECURITY_QUESTIONS.map((question, index) => {
+                      const isSelected = selectedQuestions.includes(index)
+                      const isDisabled = !isSelected && selectedQuestions.length >= RECOVERY_ANSWERS_REQUIRED
+                      return (
+                        <div key={question}>
+                          <label
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: 8, cursor: isDisabled ? 'not-allowed' : 'pointer',
+                              opacity: isDisabled ? 0.45 : 1, fontSize: '0.85rem', fontWeight: 600, color: 'var(--dark-ink)',
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              disabled={isDisabled}
+                              onChange={() => toggleQuestion(index)}
+                            />
+                            {question}
+                          </label>
+                          {isSelected && (
+                            <input
+                              className="field-input"
+                              style={{ marginTop: 6 }}
+                              value={questionAnswers[index] || ''}
+                              onChange={(e) => setQuestionAnswers(prev => ({ ...prev, [index]: e.target.value }))}
+                              placeholder="Your answer"
+                              required
+                            />
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </>
               )}
 
-              <label className="field-label">
-                Email address
-                <input
-                  className="field-input"
-                  type="email"
-                  value={form.email}
-                  onChange={field('email')}
-                  placeholder="you@example.com"
-                  required
-                  autoComplete="email"
-                />
-              </label>
+              {mode === 'forgot' && forgotStep === 'reset' && (
+                <>
+                  <label className="field-label">
+                    New password
+                    <input
+                      className="field-input"
+                      type="password"
+                      value={form.password}
+                      onChange={field('password')}
+                      placeholder="Choose a new password"
+                      required
+                      minLength={8}
+                      autoComplete="new-password"
+                    />
+                  </label>
+                  <label className="field-label">
+                    Confirm new password
+                    <input
+                      className="field-input"
+                      type="password"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      placeholder="Re-enter your new password"
+                      required
+                      minLength={8}
+                      autoComplete="new-password"
+                    />
+                  </label>
+                </>
+              )}
 
-              <label className="field-label">
-                {mode === 'forgot' ? 'New password' : 'Password'}
-                <input
-                  className="field-input"
-                  type="password"
-                  value={form.password}
-                  onChange={field('password')}
-                  placeholder={mode === 'signup' ? 'At least 8 characters' : mode === 'forgot' ? 'Choose a new password' : '••••••••'}
-                  required
-                  minLength={mode === 'signup' || mode === 'forgot' ? 8 : undefined}
-                  autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                />
-              </label>
+              {(mode === 'login' || mode === 'signup') && (
+                <label className="field-label">
+                  Email address
+                  <input
+                    className="field-input"
+                    type="email"
+                    value={form.email}
+                    onChange={field('email')}
+                    placeholder="you@example.com"
+                    required
+                    autoComplete="email"
+                  />
+                </label>
+              )}
+
+              {(mode === 'login' || mode === 'signup') && (
+                <label className="field-label">
+                  Password
+                  <input
+                    className="field-input"
+                    type="password"
+                    value={form.password}
+                    onChange={field('password')}
+                    placeholder={mode === 'signup' ? 'At least 8 characters' : '••••••••'}
+                    required
+                    minLength={mode === 'signup' ? 8 : undefined}
+                    autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                  />
+                </label>
+              )}
 
               {mode === 'login' && (
                 <div style={{ textAlign: 'right' }}>
@@ -233,6 +375,17 @@ export default function AuthPage() {
                     Forgot password?
                   </button>
                 </div>
+              )}
+
+              {notice && mode === 'login' && (
+                <motion.p
+                  className="notice notice-green"
+                  initial={{ opacity: 0, y: -6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  style={{ borderRadius: 12 }}
+                >
+                  {notice}
+                </motion.p>
               )}
 
               {error && (
@@ -254,8 +407,16 @@ export default function AuthPage() {
                 style={{ marginTop: 4 }}
               >
                 {submitting
-                  ? (mode === 'login' ? 'Signing in…' : mode === 'forgot' ? 'Updating password…' : 'Creating account…')
-                  : (mode === 'login' ? 'Sign In' : mode === 'forgot' ? 'Reset Password' : 'Create Account')
+                  ? (mode === 'login'
+                      ? 'Signing in…'
+                      : mode === 'forgot'
+                        ? (forgotStep === 'verify' ? 'Verifying…' : 'Updating password…')
+                        : 'Creating account…')
+                  : (mode === 'login'
+                      ? 'Sign In'
+                      : mode === 'forgot'
+                        ? (forgotStep === 'verify' ? 'Verify Answers' : 'Reset Password')
+                        : 'Create Account')
                 }
               </motion.button>
             </form>

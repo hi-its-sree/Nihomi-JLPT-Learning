@@ -9,6 +9,7 @@ import './App.css'
 // Eager — always needed on first load
 import SplashScreenPage from './pages/SplashScreenPage'
 import AuthPage from './pages/AuthPage'
+import SecurityQuestionsPage from './pages/SecurityQuestionsPage'
 
 // Lazy — loaded only when the route is visited
 const HomePage         = lazy(() => import('./pages/HomePage'))
@@ -217,6 +218,21 @@ function AuthenticatedLayout() {
   )
 }
 
+function SecurityQuestionsGate({ children }) {
+  const { user, loading } = useAuth()
+  const location = useLocation()
+
+  if (loading) return children
+
+  const needsSecurityQuestions = Boolean(user) && !user.hasRecoveryAnswers
+  const isSecurityQuestionsRoute = location.pathname === '/security-questions'
+
+  if (needsSecurityQuestions && !isSecurityQuestionsRoute) {
+    return <Navigate to="/security-questions" replace />
+  }
+  return children
+}
+
 const JOURNEY_ESCAPE_ROUTES = ['/settings', '/profile', '/achievements', '/about', '/contact']
 
 function JourneyGate({ children }) {
@@ -253,8 +269,12 @@ function AppRoutes() {
       <Route path="/auth" element={<AuthPage />} />
       <Route path="/home" element={<Suspense fallback={<PageLoader />}><HomePage /></Suspense>} />
 
+      {/* One-time step between signup and onboarding — its own route so the
+          gate below can send anyone missing recovery answers here first. */}
+      <Route path="/security-questions" element={<ProtectedRoute><SecurityQuestionsPage /></ProtectedRoute>} />
+
       {/* Authenticated — shared topbar */}
-      <Route element={<ProtectedRoute><JourneyGate><AuthenticatedLayout /></JourneyGate></ProtectedRoute>}>
+      <Route element={<ProtectedRoute><SecurityQuestionsGate><JourneyGate><AuthenticatedLayout /></JourneyGate></SecurityQuestionsGate></ProtectedRoute>}>
         <Route path="/main" element={<MainLandingPage />} />
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/about" element={<AboutPage />} />
@@ -283,7 +303,7 @@ function AppRoutes() {
       </Route>
 
       {/* Beginner Journey — own minimal chrome, no topbar/bottom-nav */}
-      <Route element={<ProtectedRoute><JourneyLayoutRoute /></ProtectedRoute>}>
+      <Route element={<ProtectedRoute><SecurityQuestionsGate><JourneyLayoutRoute /></SecurityQuestionsGate></ProtectedRoute>}>
         <Route path="/beginners-guide" element={<BeginnersGuidePage />} />
         <Route path="/journey/welcome" element={<WelcomeChapter />} />
         <Route path="/journey/jlpt-overview" element={<JlptOverviewChapter />} />

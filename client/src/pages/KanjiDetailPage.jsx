@@ -2,49 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Link, useParams } from 'react-router-dom'
 import api from '../lib/api'
-
-/* ── Stroke data (simplified SVG paths per kanji) ─────────
-   Each path is one brush stroke. Real production data would
-   come from a KanjiVG API; these are illustrative paths.   */
-const STROKE_DATA = {
-  '日': [
-    'M 60,25 L 140,25',
-    'M 60,25 L 60,175',
-    'M 140,25 L 140,175',
-    'M 60,100 L 140,100',
-    'M 60,175 L 140,175',
-  ],
-  '水': [
-    'M 100,20 L 100,80',
-    'M 100,80 C 80,120 40,150 30,170',
-    'M 100,80 C 120,120 160,150 170,170',
-    'M 55,95 C 45,120 40,140 50,160',
-  ],
-  '山': [
-    'M 50,150 L 50,50 L 50,150',
-    'M 100,150 L 100,20 L 100,150',
-    'M 150,150 L 150,80 L 150,150',
-    'M 30,150 L 170,150',
-  ],
-  '学': [
-    'M 80,20 L 80,60',
-    'M 60,40 L 140,40',
-    'M 100,20 L 100,80',
-    'M 50,80 L 150,80',
-    'M 100,80 L 100,180',
-    'M 60,120 L 140,120',
-    'M 60,160 L 80,180 L 100,160',
-    'M 100,160 L 120,180 L 140,160',
-  ],
-  default: [
-    'M 100,30 L 100,170',
-    'M 40,100 L 160,100',
-    'M 60,40 L 60,160',
-    'M 140,40 L 140,160',
-    'M 40,40 L 160,40',
-    'M 40,160 L 160,160',
-  ],
-}
+import { getKanjiStrokePaths } from '../lib/kanjiStrokeData.mjs'
+import DeckMenu from '../components/DeckMenu'
+import FloatingMenu from '../components/FloatingMenu'
 
 function StrokeOrderPlayer({ strokes = [] }) {
   const [current, setCurrent] = useState(-1)  // -1 = show all faded
@@ -162,8 +122,11 @@ export default function KanjiDetailPage() {
   const { kanjiId } = useParams()
   const char = kanjiId ? decodeURIComponent(kanjiId) : '日'
   const [kanji, setKanji] = useState(null)
+  const [strokePaths, setStrokePaths] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [inFlashcards, setInFlashcards] = useState(false)
+  const [deckMenuPos, setDeckMenuPos] = useState(null) // { top, left } | null
 
   useEffect(() => {
     let mounted = true
@@ -171,11 +134,30 @@ export default function KanjiDetailPage() {
     const fetchKanji = async () => {
       setLoading(true)
       setError('')
+      setStrokePaths([])
+      setInFlashcards(false)
+      setDeckMenuPos(null)
 
       try {
         const response = await api.get(`/api/kanji/${encodeURIComponent(char)}`)
         if (!mounted) return
-        setKanji(response.data?.data ?? null)
+
+        const kanjiData = response.data?.data ?? null
+        setKanji(kanjiData)
+
+        const paths = await getKanjiStrokePaths(char, kanjiData?.strokeCount || 0)
+        if (!mounted) return
+        setStrokePaths(paths)
+
+        if (kanjiData?.id) {
+          try {
+            const { data } = await api.get('/api/v1/flashcards/kanji-ids')
+            if (!mounted) return
+            setInFlashcards((data.kanjiIds || []).includes(kanjiData.id))
+          } catch {
+            // Non-critical — the add button just falls back to "not added" state.
+          }
+        }
       } catch (err) {
         if (!mounted) return
         console.error('Failed to load kanji details', err)
@@ -191,6 +173,16 @@ export default function KanjiDetailPage() {
     }
   }, [char])
 
+  function openDeckMenu(e) {
+    e.stopPropagation()
+    if (deckMenuPos) {
+      setDeckMenuPos(null)
+      return
+    }
+    const rect = e.currentTarget.getBoundingClientRect()
+    setDeckMenuPos({ top: rect.bottom + 6, left: rect.left })
+  }
+
   const info = kanji
     ? {
         meaning: kanji.meaning || '—',
@@ -201,15 +193,14 @@ export default function KanjiDetailPage() {
         examples: [],
       }
     : { meaning: 'Kanji', on: '—', kun: '—', level: 'N5', strokes: 0, examples: [] }
-  const paths = STROKE_DATA[char] ?? STROKE_DATA.default
 
   return (
     <div className="page-shell">
 
       {/* Back nav */}
-      <div style={{ display: 'flex', gap: 10 }}>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         <Link to="/kanji" className="ghost-btn btn-sm">← Back to Kanji</Link>
-        <Link to="/flashcards" className="ghost-btn btn-sm">Add to SRS →</Link>
+        <Link to="/flashcards" className="ghost-btn btn-sm">Review Flashcards →</Link>
       </div>
 
       {/* Hero row */}
@@ -278,9 +269,25 @@ export default function KanjiDetailPage() {
             <div style={{ marginTop: 20, color: 'var(--muted-plum)', fontWeight: 600 }}>{error}</div>
           )}
 
-          <div style={{ display: 'flex', gap: 10, marginTop: 20, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 10, marginTop: 20, flexWrap: 'wrap', alignItems: 'center' }}>
             <Link to="/practice" className="primary-btn">Practice Now</Link>
-            <Link to="/flashcards" className="secondary-btn">Add to Flashcards</Link>
+
+            <div>
+              <button
+                type="button"
+                className="secondary-btn"
+                disabled={!kanji}
+                onClick={openDeckMenu}
+              >
+                {inFlashcards ? '✓ In Flashcards' : 'Add to Flashcards'} ▾
+              </button>
+
+              {deckMenuPos && kanji && (
+                <FloatingMenu position={deckMenuPos} onClose={() => setDeckMenuPos(null)}>
+                  <DeckMenu kanjiId={kanji.id} onMembershipChange={setInFlashcards} />
+                </FloatingMenu>
+              )}
+            </div>
           </div>
         </motion.div>
       </div>
@@ -292,7 +299,7 @@ export default function KanjiDetailPage() {
         transition={{ delay: 0.3 }}
       >
         <div className="section-title" style={{ marginBottom: 16 }}>Stroke Order Animation</div>
-        <StrokeOrderPlayer strokes={paths} />
+        <StrokeOrderPlayer strokes={strokePaths} />
       </motion.div>
 
       {/* Mnemonic / study tip */}
